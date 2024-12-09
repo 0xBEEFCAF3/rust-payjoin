@@ -70,6 +70,16 @@ impl<'a> SenderBuilder<'a> {
         })
     }
 
+    /// Build a sender with optimistic merge enabled
+    /// TODO(armins) this is pretty much skipping all the validating and checks by calling v1::build_with_multiple_senders
+    pub fn build_with_multiple_senders(self) -> Result<Sender, BuildSenderError> {
+        Ok(Sender {
+            v1: self.0.build_with_multiple_senders()?,
+            reply_key: HpkeKeyPair::gen_keypair().0,
+            opt_in_to_optimistic_merge: true,
+        })
+    }
+
     /// Offer the receiver contribution to pay for his input.
     ///
     /// These parameters will allow the receiver to take `max_fee_contribution` from given change
@@ -178,6 +188,7 @@ impl Sender {
                     payee: self.v1.payee.clone(),
                     min_fee_rate: self.v1.min_fee_rate,
                     allow_mixed_input_scripts: true,
+                    allow_optimistic_merge: self.opt_in_to_optimistic_merge,
                 },
                 hpke_ctx,
                 ohttp_ctx,

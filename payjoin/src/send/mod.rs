@@ -37,6 +37,7 @@ pub struct PsbtContext {
     min_fee_rate: FeeRate,
     payee: ScriptBuf,
     allow_mixed_input_scripts: bool,
+    allow_optimistic_merge: bool,
 }
 
 macro_rules! check_eq {
@@ -63,7 +64,11 @@ impl PsbtContext {
         self.check_inputs(&proposal)?;
         let contributed_fee = self.check_outputs(&proposal)?;
         self.restore_original_utxos(&mut proposal)?;
-        self.check_fees(&proposal, contributed_fee)?;
+        
+        // TODO cannot check fee for optimistic v2 merges as they include utxo with missing info
+        if !self.allow_optimistic_merge {
+            self.check_fees(&proposal, contributed_fee)?;
+        }
         Ok(proposal)
     }
 
@@ -166,18 +171,21 @@ impl PsbtContext {
                         .next()
                         .ok_or(InternalProposalError::NoInputs)?;
                     // Verify the PSBT input is finalized
-                    ensure!(
-                        proposed.psbtin.final_script_sig.is_some()
-                            || proposed.psbtin.final_script_witness.is_some(),
-                        ReceiverTxinNotFinalized
-                    );
-                    // Verify that non_witness_utxo or witness_utxo are filled in.
-                    ensure!(
-                        proposed.psbtin.witness_utxo.is_some()
-                            || proposed.psbtin.non_witness_utxo.is_some(),
-                        ReceiverTxinMissingUtxoInfo
-                    );
-                    ensure!(proposed.txin.sequence == original.txin.sequence, MixedSequence);
+                    if !self.allow_optimistic_merge {
+                        ensure!(
+                            proposed.psbtin.final_script_sig.is_some()
+                                || proposed.psbtin.final_script_witness.is_some(),
+                            ReceiverTxinNotFinalized
+                        );
+
+                        // Verify that non_witness_utxo or witness_utxo are filled in.
+                        ensure!(
+                            proposed.psbtin.witness_utxo.is_some()
+                                || proposed.psbtin.non_witness_utxo.is_some(),
+                            ReceiverTxinMissingUtxoInfo
+                        );
+                    }
+                   ensure!(proposed.txin.sequence == original.txin.sequence, MixedSequence);
                     if !self.allow_mixed_input_scripts {
                         check_eq!(
                             proposed.address_type()?,
@@ -445,6 +453,7 @@ pub(crate) mod test {
             min_fee_rate: FeeRate::ZERO,
             payee,
             allow_mixed_input_scripts: false,
+            allow_optimistic_merge: false,
         }
     }
 
