@@ -6,8 +6,11 @@ pub use crate::psbt::PsbtInputError;
 use crate::psbt::{InternalInputPair, InternalPsbtInputError};
 
 mod error;
+
 pub(crate) mod optional_parameters;
 
+#[cfg(all(feature = "v2", feature = "multi-party"))]
+pub mod multi_party;
 #[cfg(feature = "v1")]
 pub mod v1;
 #[cfg(not(feature = "v1"))]

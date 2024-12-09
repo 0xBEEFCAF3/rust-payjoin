@@ -27,7 +27,7 @@ const SUPPORTED_VERSIONS: &[usize] = &[1, 2];
 static TWENTY_FOUR_HOURS_DEFAULT_EXPIRY: Duration = Duration::from_secs(60 * 60 * 24);
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-struct SessionContext {
+pub struct SessionContext {
     #[serde(deserialize_with = "deserialize_address_assume_checked")]
     address: Address,
     directory: url::Url,
@@ -176,6 +176,9 @@ impl Receiver {
         // see: https://github.com/bitcoin/bips/blob/master/bip-0078.mediawiki#unsecured-payjoin-server
         if params.v == 1 {
             params.disable_output_substitution = true;
+
+            // Additionally V1 sessions never have an optimistic merge opportunity
+            params.optimistic_merge = false;
         }
 
         log::debug!("Received request with params: {:?}", params);
@@ -209,8 +212,8 @@ impl Receiver {
 /// call assume_interactive_receive to proceed with validation.
 #[derive(Debug, Clone)]
 pub struct UncheckedProposal {
-    v1: v1::UncheckedProposal,
-    context: SessionContext,
+    pub(crate) v1: v1::UncheckedProposal,
+    pub(crate) context: SessionContext,
 }
 
 impl UncheckedProposal {
@@ -472,6 +475,9 @@ pub struct PayjoinProposal {
 }
 
 impl PayjoinProposal {
+    // TODO hack to get multi party working. A better solution would be to allow extract_v2_req to be seperate from the rest of the v2 context
+    pub fn new(v1: v1::PayjoinProposal, context: SessionContext) -> Self { Self { v1, context } }
+
     pub fn utxos_to_be_locked(&self) -> impl '_ + Iterator<Item = &bitcoin::OutPoint> {
         self.v1.utxos_to_be_locked()
     }

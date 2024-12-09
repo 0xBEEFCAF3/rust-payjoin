@@ -155,6 +155,45 @@ pub fn init_bitcoind_sender_receiver(
     Ok((bitcoind, sender, receiver))
 }
 
+pub fn init_bitcoind_multi_sender_single_reciever(
+    number_of_senders: usize,
+) -> Result<(bitcoind::BitcoinD, Vec<bitcoincore_rpc::Client>, bitcoincore_rpc::Client), BoxError> {
+    let (bitcoind, _sender, receiver) = init_bitcoind_sender_receiver(None, None)?;
+    let mut senders = vec![];
+
+    // to give the rest of the senders a predictable balance, lets create a specialized wallet and fund all the senders with the same amount
+    // The rest of the test suite has 50 BTC hardcoded, so lets stick with that
+    let funding_wallet_name = "funding_wallet";
+    let funding_wallet = bitcoind.create_wallet(funding_wallet_name)?;
+    let funding_address = funding_wallet.get_new_address(None, None)?.assume_checked();
+    bitcoind.client.generate_to_address(101 + number_of_senders as u64, &funding_address)?;
+
+    // Now lets fund the senders
+    for i in 0..number_of_senders {
+        let wallet_name = format!("sender_{}", i);
+        let sender = bitcoind.create_wallet(wallet_name.clone())?;
+        let address = sender.get_new_address(Some(&wallet_name), None)?.assume_checked();
+        // bitcoind.client.load_wallet(&funding_wallet_name).unwrap();
+        funding_wallet.send_to_address(
+            &address,
+            Amount::from_btc(50.0)?,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+        )?;
+        bitcoind.client.generate_to_address(1, &funding_address)?;
+
+        let balances = sender.get_balances()?;
+        assert_eq!(balances.mine.trusted, Amount::from_btc(50.0)?, "sender doesn't own bitcoin");
+        senders.push(sender);
+    }
+
+    Ok((bitcoind, senders, receiver))
+}
+
 pub fn http_agent(cert_der: Vec<u8>) -> Result<Client, BoxError> {
     Ok(http_agent_builder(cert_der)?.build()?)
 }

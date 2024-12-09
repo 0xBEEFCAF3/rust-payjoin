@@ -51,6 +51,8 @@ mod uri;
 
 #[cfg(feature = "base64")]
 pub use bitcoin::base64;
+#[cfg(all(feature = "v2", feature = "multi-party"))]
+pub use receive::multi_party;
 #[cfg(feature = "_core")]
 pub use uri::{PjParseError, PjUri, Uri, UriExt};
 #[cfg(feature = "_core")]
