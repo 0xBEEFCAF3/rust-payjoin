@@ -1,4 +1,5 @@
 //! Utilities to make work with PSBTs easier
+pub mod merge;
 
 use std::collections::BTreeMap;
 use std::fmt;
@@ -24,7 +25,6 @@ impl fmt::Display for InconsistentPsbt {
 }
 
 impl std::error::Error for InconsistentPsbt {}
-
 /// Our Psbt type for validation and utilities
 pub(crate) trait PsbtExt: Sized {
     fn inputs_mut(&mut self) -> &mut [psbt::Input];
