@@ -253,6 +253,7 @@ impl Sender {
             self.fee_contribution,
             self.min_fee_rate,
             "1", // payjoin version
+            false, // Opt into optimistic multiparty payjoin
         )?;
         let body = self.psbt.to_string().as_bytes().to_vec();
         Ok((

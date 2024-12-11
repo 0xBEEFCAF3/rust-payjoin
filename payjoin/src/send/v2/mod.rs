@@ -67,6 +67,7 @@ impl<'a> SenderBuilder<'a> {
         Ok(Sender {
             v1: self.0.build_recommended(min_fee_rate)?,
             reply_key: HpkeKeyPair::gen_keypair().0,
+            opt_in_to_optimistic_merge: false,
         })
     }
 
@@ -107,6 +108,7 @@ impl<'a> SenderBuilder<'a> {
                 min_fee_rate,
                 clamp_fee_contribution,
             )?,
+            opt_in_to_optimistic_merge: false,
             reply_key: HpkeKeyPair::gen_keypair().0,
         })
     }
@@ -122,6 +124,7 @@ impl<'a> SenderBuilder<'a> {
         Ok(Sender {
             v1: self.0.build_non_incentivizing(min_fee_rate)?,
             reply_key: HpkeKeyPair::gen_keypair().0,
+            opt_in_to_optimistic_merge: false,
         })
     }
 }
@@ -132,6 +135,8 @@ pub struct Sender {
     v1: v1::Sender,
     /// The secret key to decrypt the receiver's reply.
     reply_key: HpkeSecretKey,
+    /// Allow for optimistic merge
+    opt_in_to_optimistic_merge: bool,
 }
 
 impl Sender {
@@ -164,6 +169,7 @@ impl Sender {
             self.v1.disable_output_substitution,
             self.v1.fee_contribution,
             self.v1.min_fee_rate,
+            self.opt_in_to_optimistic_merge,
         )?;
         let hpke_ctx = HpkeContext::new(rs, &self.reply_key);
         let body = encrypt_message_a(
@@ -210,6 +216,7 @@ fn serialize_v2_body(
     disable_output_substitution: bool,
     fee_contribution: Option<(bitcoin::Amount, usize)>,
     min_feerate: FeeRate,
+    opt_in_to_optimistic_merge: bool,
 ) -> Result<Vec<u8>, CreateRequestError> {
     // Grug say localhost base be discarded anyway. no big brain needed.
     let placeholder_url = serialize_url(
@@ -218,6 +225,7 @@ fn serialize_v2_body(
         fee_contribution,
         min_feerate,
         "2", // payjoin version
+        opt_in_to_optimistic_merge,
     )
     .map_err(InternalCreateRequestError::Url)?;
     let query_params = placeholder_url.query().unwrap_or_default();
@@ -348,6 +356,7 @@ mod test {
                 payee: ScriptBuf::from(vec![0x00]),
             },
             reply_key: HpkeKeyPair::gen_keypair().0,
+            opt_in_to_optimistic_merge: false,
         };
         let serialized = serde_json::to_string(&req_ctx).unwrap();
         let deserialized = serde_json::from_str(&serialized).unwrap();

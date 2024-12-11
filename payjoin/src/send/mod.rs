@@ -411,6 +411,7 @@ fn serialize_url(
     fee_contribution: Option<OutputAmountAndIndex>,
     min_fee_rate: FeeRate,
     version: &str,
+    opt_in_to_optimistic_merge: bool,
 ) -> Result<Url, url::ParseError> {
     let mut url = endpoint;
     url.query_pairs_mut().append_pair("v", version);
@@ -421,6 +422,9 @@ fn serialize_url(
         url.query_pairs_mut()
             .append_pair("additionalfeeoutputindex", &index.to_string())
             .append_pair("maxadditionalfeecontribution", &amount.to_sat().to_string());
+    }
+    if opt_in_to_optimistic_merge {
+        url.query_pairs_mut().append_pair("optimisticmerge", "1");
     }
     if min_fee_rate > FeeRate::ZERO {
         // TODO serialize in rust-bitcoin <https://github.com/rust-bitcoin/rust-bitcoin/pull/1787/files#diff-c2ea40075e93ccd068673873166cfa3312ec7439d6bc5a4cbc03e972c7e045c4>

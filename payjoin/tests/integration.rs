@@ -180,7 +180,7 @@ mod integration {
         use payjoin::send::v2::SenderBuilder;
         use payjoin::{OhttpKeys, PjUri, UriExt};
         use payjoin::receive::v2::{
-            MultiPartyProposal, PayjoinProposal, Receiver, UnMergedMultiPartyProposal,
+            PayjoinProposal, Receiver, UnMergedMultiPartyProposal,
             UncheckedProposal,
         };
         use reqwest::{Client, ClientBuilder, Error, Response};
@@ -398,6 +398,7 @@ mod integration {
                         .build_with_multiple_senders()?;
                 let (Request { url, body, content_type, .. }, send_post_ctx_1) =
                     sender_ctx_1.extract_v2(directory.to_owned())?;
+
                 let response = agent
                     .post(url.clone())
                     .header("Content-Type", content_type)
@@ -408,6 +409,7 @@ mod integration {
                 assert!(response.status().is_success());
                 let sender_get_ctx_1 = send_post_ctx_1
                     .process_response(&mut response.bytes().await?.to_vec().as_slice())?;
+
                 //**********************
                 // Inside Sender 2
                 // Sender 2 will POST a different psbt to the same subdir id
