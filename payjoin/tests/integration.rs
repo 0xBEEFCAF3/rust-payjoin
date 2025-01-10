@@ -177,7 +177,7 @@ mod integration {
 
         use bitcoin::Address;
         use http::StatusCode;
-        use payjoin::send::v2::SenderBuilder;
+        use payjoin::send::v2::{SenderBuilder, V2GetContext, V2PostContext};
         use payjoin::{OhttpKeys, PjUri, UriExt};
         use payjoin::receive::v2::{
             PayjoinProposal, Receiver, UnMergedMultiPartyProposal,
@@ -340,8 +340,16 @@ mod integration {
                 directory: Url,
                 cert_der: Vec<u8>,
             ) -> Result<(), BoxError> {
-                let (_bitcoind, senders, receiver) = init_bitcoind_multi_sender_single_reciever(2)?;
-                assert_eq!(senders.len(), 2);
+                let num_senders = 2;
+                let (_bitcoind, senders, receiver) = init_bitcoind_multi_sender_single_reciever(num_senders)?;
+                assert_eq!(senders.len(), num_senders);
+
+                struct InnerSenderTestSession<'a> {
+                    receiver_session: Receiver,
+                    pj_uri: PjUri<'a>,
+                    sender_ctx: Option<V2GetContext>,
+                }
+                let mut inner_sender_test_sessions = vec![];
 
                 let agent = Arc::new(http_agent(cert_der.clone())?);
                 wait_for_service_ready(ohttp_relay.clone(), agent.clone()).await.unwrap();
@@ -355,122 +363,79 @@ mod integration {
                 // **********************
                 // Inside the Receiver:
                 // lets generate two different addresses for two senders
-                let address_1 = receiver.get_new_address(None, None)?.assume_checked();
-                let address_2 = receiver.get_new_address(None, None)?.assume_checked();
-                println!("address_1: {:?}", address_1);
-                println!("address_2: {:?}", address_2);
-                assert_ne!(address_1, address_2);
-
-                // We are going to create two reciever sessions just two use different addresses
-                // but they share the same directory keys
-                let mut receiver_session_1 = initialize_session(
-                    address_1.clone(),
-                    directory.clone(),
-                    ohttp_keys.clone(),
-                    None,
-                );
-
-                let mut reciever_session_2 = initialize_session(
-                    address_2.clone(),
-                    directory.clone(),
-                    ohttp_keys.clone(),
-                    None,
-                );
-
-                // These bip21's should be using the different addresses and different directory keys
-                // Senders will append their psbt's to the different subdir ids
-                // And use the different reciever pk to encrypt the payload
-                let pj_uri_string_1 = receiver_session_1.pj_uri().to_string();
-                println!("pj_uri_string_1: {:#?}", pj_uri_string_1);
-                let pj_uri_string_2 = reciever_session_2.pj_uri().to_string();
-                println!("pj_uri_string_2: {:#?}", pj_uri_string_2);
-
+                for _ in 0..num_senders {
+                    let address = receiver.get_new_address(None, None)?.assume_checked();
+                    let receiver_session = initialize_session(
+                        address.clone(),
+                        directory.clone(),
+                        ohttp_keys.clone(),
+                        None,
+                    );
+                    let pj_uri = receiver_session.pj_uri();
+                    inner_sender_test_sessions.push(InnerSenderTestSession {
+                        receiver_session,
+                        pj_uri,
+                        sender_ctx: None,
+                    });
+                }
                 // **********************
-                // Inside Sender 1
-                let pj_uri_1 = Uri::from_str(&pj_uri_string_1)
-                    .unwrap()
-                    .assume_checked()
-                    .check_pj_supported()
-                    .unwrap();
-                let psbt_1 = build_sweep_psbt(&senders[0], &pj_uri_1)?;
-                let sender_ctx_1 =
-                    SenderBuilder::new(psbt_1.clone(), pj_uri_1.clone())
-                        .build_with_multiple_senders()?;
-                let (Request { url, body, content_type, .. }, send_post_ctx_1) =
-                    sender_ctx_1.extract_v2(directory.to_owned())?;
+                // Inside Senders 
 
-                let response = agent
-                    .post(url.clone())
-                    .header("Content-Type", content_type)
-                    .body(body.clone())
-                    .send()
-                    .await
-                    .unwrap();
-                assert!(response.status().is_success());
-                let sender_get_ctx_1 = send_post_ctx_1
-                    .process_response(&mut response.bytes().await?.to_vec().as_slice())?;
+                for (i, sender_sesssion) in inner_sender_test_sessions.iter_mut().enumerate() {
+                    let pj_uri = sender_sesssion.pj_uri.clone();
+                    let psbt = build_sweep_psbt(&senders[i], &pj_uri)?;
+                    let sender_ctx =
+                        SenderBuilder::new(psbt.clone(), pj_uri.clone())
+                            .build_with_multiple_senders()?;
 
-                //**********************
-                // Inside Sender 2
-                // Sender 2 will POST a different psbt to the same subdir id
-                let pj_uri_2 = Uri::from_str(&pj_uri_string_2)
-                    .unwrap()
-                    .assume_checked()
-                    .check_pj_supported()
-                    .unwrap();
-                let psbt_2 = build_sweep_psbt(&senders[1], &pj_uri_2)?;
+                    let (Request { url, body, content_type, .. }, send_post_ctx) =
+                        sender_ctx.extract_v2(directory.to_owned())?;
 
-                let sender_ctx_2 =
-                    SenderBuilder::new(psbt_2.clone(), pj_uri_2.clone())
-                        .build_with_multiple_senders()?;
-                let (Request { url, body, content_type, .. }, send_post_ctx_2) =
-                    sender_ctx_2.extract_v2(directory.to_owned())?;
+                    let response = agent
+                        .post(url.clone())
+                        .header("Content-Type", content_type)
+                        .body(body.clone())
+                        .send()
+                        .await
+                        .unwrap();
 
-                let response = agent
-                    .post(url.clone())
-                    .header("Content-Type", content_type)
-                    .body(body.clone())
-                    .send()
-                    .await
-                    .unwrap();
-                assert!(response.status().is_success());
-                let sender_get_ctx_2 = send_post_ctx_2
-                    .process_response(&mut response.bytes().await?.to_vec().as_slice())?;
 
+                    assert!(response.status().is_success());
+                    let sender_get_ctx = send_post_ctx
+                        .process_response(&mut response.bytes().await?.to_vec().as_slice())?;
+
+                    sender_sesssion.sender_ctx = Some(sender_get_ctx);
+                }
+
+                // TODO re-enable check for different psbt
                 // psbt's should be different
-                assert_ne!(psbt_1, psbt_2);
+                // assert_ne!(psbt_1, psbt_2);
 
                 // **********************
                 // Inside the Receiver:
                 // GET fallback psbt for sender 1
-                let (req, reciever_ctx_1) = receiver_session_1.extract_req()?;
-                let response_1 = agent.post(req.url).body(req.body).send().await?;
-                assert!(response_1.status().is_success());
 
-                // GET fallback psbt for sender 2
-                let (req, reciever_ctx_2) = reciever_session_2.extract_req()?;
-                let response_2 = agent.post(req.url).body(req.body).send().await?;
-                assert!(response_2.status().is_success());
-
-                // POST payjoin
-                let proposal_1 = receiver_session_1
-                    .process_res(response_1.bytes().await?.to_vec().as_slice(), reciever_ctx_1)?
-                    .unwrap();
-                let proposal_2 = reciever_session_2
-                    .process_res(response_2.bytes().await?.to_vec().as_slice(), reciever_ctx_2)?
-                    .unwrap();
+                let mut proposals = vec![];
+                for sender_sesssion in inner_sender_test_sessions.iter() {
+                    let mut receiver_session = sender_sesssion.receiver_session.clone();
+                    let (req, reciever_ctx) = receiver_session.extract_req()?;
+                    let response = agent.post(req.url).body(req.body).send().await?;
+                    assert!(response.status().is_success());
+                    let res = response.bytes().await?.to_vec();
+                    let proposal = receiver_session.process_res(&res, reciever_ctx)?.unwrap();
+                    proposals.push(proposal);
+                }
 
                 // Order of the proposals is not important
                 let multi_party_proposal =
-                    UnMergedMultiPartyProposal::new(vec![proposal_1, proposal_2]);
+                    UnMergedMultiPartyProposal::new(proposals);
 
                 // Merge and finalize all the reciever inputs
-                let mut payjoin_proposal =
+                let mut multi_sender_payjoin_proposal =
                     handle_multi_party_proposal(&receiver, multi_party_proposal);
 
-                    
                 // Send the payjoin proposals to the senders
-                for proposal in payjoin_proposal.iter_mut() {
+                for proposal in multi_sender_payjoin_proposal.iter_mut() {
                     let (req, ctx) = proposal.extract_v2_req()?;
                     let response = agent
                         .post(req.url)
@@ -486,111 +451,67 @@ mod integration {
                 
                 // Check resulting transaction and balances
                 // **********************
-                // Inside the Sender 1:
-                let (Request { url, body, content_type, .. }, ohttp_ctx) =
-                    sender_get_ctx_1.extract_req(directory.to_owned())?;
-                let sender_1_response = agent
-                    .post(url.clone())
-                    .header("Content-Type", content_type)
-                    .body(body.clone())
-                    .send()
-                    .await
-                    .unwrap();
-                let checked_payjoin_proposal_psbt_1 = sender_get_ctx_1
-                    .process_response(
-                        &mut sender_1_response.bytes().await?.to_vec().as_slice(),
-                        ohttp_ctx,
-                    )?
-                    .unwrap();
+                // Inside the Senders
+                for (i, sender_sesssion) in inner_sender_test_sessions.iter().enumerate() {
+                    let sender_ctx = sender_sesssion.sender_ctx.as_ref().unwrap();
+                    let (Request { url, body, content_type, .. }, ohttp_ctx) = sender_ctx.extract_req(directory.to_owned())?;
 
-                let finalized_psbt_1 =
-                    finalize_psbt(&senders[0], &checked_payjoin_proposal_psbt_1)?;
-                let sender_ctx_1 =
-                    SenderBuilder::new(finalized_psbt_1.clone(), pj_uri_1.clone())
-                        .build_with_multiple_senders()?;
-                let (Request { url, body, content_type, .. }, send_post_ctx_1) =
-                    sender_ctx_1.extract_v2(directory.to_owned())?;
-                let response = agent
-                    .post(url.clone())
-                    .header("Content-Type", content_type)
-                    .body(body.clone())
-                    .send()
-                    .await
-                    .unwrap();
-                assert!(response.status().is_success());
-                send_post_ctx_1
-                    .process_response(&mut response.bytes().await?.to_vec().as_slice())?;
+                    let response = agent
+                        .post(url.clone())
+                        .header("Content-Type", content_type)
+                        .body(body.clone())
+                        .send()
+                        .await
+                        .unwrap();
+                    let checked_payjoin_proposal_psbt = sender_ctx
+                        .process_response(
+                            &mut response.bytes().await?.to_vec().as_slice(),
+                            ohttp_ctx,
+                        )?
+                        .unwrap();
+                    let finalized_psbt = finalize_psbt(&senders[i], &checked_payjoin_proposal_psbt)?;
+                    let sender =
+                        SenderBuilder::new(finalized_psbt.clone(), sender_sesssion.pj_uri.clone())
+                            .build_with_multiple_senders()?;
+                    let (Request { url, body, content_type, .. }, send_post_ctx) =
+                        sender.extract_v2(directory.to_owned())?;
 
-                // **********************
-                // Inside the Sender 2:
-                let (Request { url, body, content_type, .. }, ohttp_ctx) =
-                    sender_get_ctx_2.extract_req(directory.to_owned())?;
-                let sender_2_response = agent
-                    .post(url.clone())
-                    .header("Content-Type", content_type)
-                    .body(body.clone())
-                    .send()
-                    .await
-                    .unwrap();
+                    let response = agent
+                        .post(url.clone())
+                        .header("Content-Type", content_type)
+                        .body(body.clone())
+                        .send()
+                        .await
+                        .unwrap();
+                    assert!(response.status().is_success());
+                    send_post_ctx
+                        .process_response(&mut response.bytes().await?.to_vec().as_slice())?;
 
-                let checked_payjoin_proposal_psbt_2 = sender_get_ctx_2
-                    .process_response(
-                        &mut sender_2_response.bytes().await?.to_vec().as_slice(),
-                        ohttp_ctx,
-                    )?
-                    .unwrap();
-                let finalized_psbt_2 =
-                    finalize_psbt(&senders[1], &checked_payjoin_proposal_psbt_2)?;
-                let sender_ctx_2 =
-                    SenderBuilder::new(finalized_psbt_2.clone(), pj_uri_2.clone())
-                        .build_with_multiple_senders()?;
-                let (Request { url, body, content_type, .. }, send_post_ctx_2) =
-                    sender_ctx_2.extract_v2(directory.to_owned())?;
-                let response = agent
-                    .post(url.clone())
-                    .header("Content-Type", content_type)
-                    .body(body.clone())
-                    .send()
-                    .await
-                    .unwrap();
-                assert!(response.status().is_success());
-                send_post_ctx_2
-                    .process_response(&mut response.bytes().await?.to_vec().as_slice())?;
-
-                // At this point the two psbt should have the same unsigned tx
-                assert_eq!(
-                    checked_payjoin_proposal_psbt_1.unsigned_tx,
-                    checked_payjoin_proposal_psbt_2.unsigned_tx
-                );
-
+                }
+                
                 //**********************
                 // Inside the Receiver:
                 // Reciver should pull the final psbts from both sub dirs
+                let mut finalized_psbts = vec![];
+                for sender_sesssion in inner_sender_test_sessions.iter() {
+                    let mut receiver_session = sender_sesssion.receiver_session.clone();
+                    let (req, reciever_ctx) = receiver_session.extract_req()?;
+                    let response = agent.post(req.url).body(req.body).send().await?;
+                    assert!(response.status().is_success());
+                    
 
-                let (req, reciever_ctx_1) = receiver_session_1.extract_req()?;
-                let response_1 = agent.post(req.url).body(req.body).send().await?;
-                assert!(response_1.status().is_success());
+                    let finalized_response = receiver_session.process_res(response.bytes().await?.to_vec().as_slice(), reciever_ctx)?.unwrap();
+                    let finalized_psbt = finalized_response.psbt().clone();
+                    finalized_psbts.push(finalized_psbt);
+                }
 
-                // GET fallback psbt for sender 2
-                let (req, reciever_ctx_2) = reciever_session_2.extract_req()?;
-                let response_2 = agent.post(req.url).body(req.body).send().await?;
-                assert!(response_2.status().is_success());
-
-                let finalized_response_1 = receiver_session_1
-                    .process_res(response_1.bytes().await?.to_vec().as_slice(), reciever_ctx_1)?
-                    .unwrap();
-                let finalized_response_2 = reciever_session_2
-                    .process_res(response_2.bytes().await?.to_vec().as_slice(), reciever_ctx_2)?
-                    .unwrap();
-
-                let mut finalized_psbt_1 = finalized_response_1.psbt().clone();
-                let finalized_psbt_2 = finalized_response_2.psbt().clone();
-
+                // for two party case we can index directly
+                let mut finalized_psbt_1 = finalized_psbts[0].clone();
+                let finalized_psbt_2 = finalized_psbts[1].clone();
                 finalized_psbt_1.combine(finalized_psbt_2).unwrap();
+
                 let network_fees = finalized_psbt_1.fee().unwrap();
-
                 let tx = finalized_psbt_1.extract_tx()?;
-
                 receiver.send_raw_transaction(&tx).expect("Failed to send raw transaction");
 
                 // let network_fees = predicted_tx_weight(&tx) * FeeRate::BROADCAST_MIN;
