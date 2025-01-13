@@ -12,6 +12,8 @@ pub mod v1;
 #[cfg(feature = "v2")]
 pub mod v2;
 
+pub mod multi_party;
+
 /// Helper to construct a pair of (txin, psbtin) with some built-in validation
 /// Use with [`InputPair::new`] to contribute receiver inputs.
 #[derive(Clone, Debug)]

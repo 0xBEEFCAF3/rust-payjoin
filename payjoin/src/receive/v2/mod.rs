@@ -219,49 +219,6 @@ impl Receiver {
     }
 }
 
-// TODO move multiparty stuff to v3 module
-pub struct UnMergedMultiPartyProposal {
-    proposals: Vec<UncheckedProposal>,
-}
-
-impl UnMergedMultiPartyProposal {
-    pub fn new(proposals: Vec<UncheckedProposal>) -> Self { Self { proposals } }
-
-    pub fn len(&self) -> usize { self.proposals.len() }
-
-    pub fn get(&self, index: usize) -> &UncheckedProposal { &self.proposals[index] }
-
-    pub fn try_merge(&mut self) -> Result<MultiPartyProposal, Error> {
-        // For now we lets assume there are two proposals
-        let mut proposal_1 = self.proposals[0].clone();
-        let mut proposal_2 = self.proposals[1].clone();
-
-        proposal_1.v1.psbt.dangerous_clear_signatures();
-        proposal_2.v1.psbt.dangerous_clear_signatures();
-        proposal_1.v1.psbt.merge_unsigned_tx(proposal_2.v1.psbt).unwrap();
-
-        Ok(MultiPartyProposal::new(
-            proposal_1.clone(),
-            vec![proposal_1.context.clone(), proposal_2.context.clone()],
-        ))
-    }
-}
-
-/// A multi-party proposal that has been merged by the receiver
-pub struct MultiPartyProposal {
-    proposal: UncheckedProposal,
-    sender_contexts: Vec<SessionContext>,
-}
-
-impl MultiPartyProposal {
-    pub fn new(proposal: UncheckedProposal, sender_contexts: Vec<SessionContext>) -> Self {
-        Self { proposal, sender_contexts }
-    }
-
-    pub fn contexts(&self) -> &Vec<SessionContext> { &self.sender_contexts }
-
-    pub fn proposal(&self) -> &UncheckedProposal { &self.proposal }
-}
 
 /// The sender's original PSBT and optional parameters
 ///
@@ -284,6 +241,9 @@ impl UncheckedProposal {
 
     // TODO hack to get v3 working, remove later
     pub fn psbt(&self) -> &Psbt { &self.v1.psbt }
+
+    // TODO hack to get v3 working, remove later
+    pub fn params(&self) -> &Params { &self.v1.params }
 
     /// The Sender's Original PSBT
     pub fn extract_tx_to_schedule_broadcast(&self) -> bitcoin::Transaction {
@@ -507,8 +467,10 @@ pub struct PayjoinProposal {
 }
 
 impl PayjoinProposal {
-    /// TODO this was a hack to get v3 working, remove later
-    pub fn set_context(&mut self, context: SessionContext) { self.context = context; }
+    // TODO hack to get multi party working. A better solution would be to allow extract_v2_req to be seperate from the rest of the v2 context
+    pub fn new(v1: v1::PayjoinProposal, context: SessionContext) -> Self {
+        Self { v1, context }
+    }
 
     pub fn utxos_to_be_locked(&self) -> impl '_ + Iterator<Item = &bitcoin::OutPoint> {
         self.v1.utxos_to_be_locked()
