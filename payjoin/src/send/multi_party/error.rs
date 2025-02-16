@@ -1,11 +1,9 @@
 use std::fmt::{self, Display};
 
-use crate::hpke::HpkeError;
 use crate::ohttp::OhttpEncapsulationError;
 use crate::receive::ImplementationError;
 use crate::send::ResponseError;
-use crate::uri::url_ext::{ParseOhttpKeysParamError, ParseReceiverPubkeyParamError};
-
+use crate::uri::url_ext::ParseReceiverPubkeyParamError;
 #[derive(Debug)]
 pub struct CreateRequestError(InternalCreateRequestError);
 
@@ -14,8 +12,6 @@ pub(crate) enum InternalCreateRequestError {
     #[allow(dead_code)]
     Expired(std::time::SystemTime),
     MissingOhttpConfig,
-    OhttpEncapsulation(OhttpEncapsulationError),
-    Hpke(HpkeError),
     ParseReceiverPubkeyParam(ParseReceiverPubkeyParamError),
     V2CreateRequest(crate::send::v2::CreateRequestError),
 }
@@ -33,8 +29,6 @@ impl std::error::Error for CreateRequestError {
         match &self.0 {
             InternalCreateRequestError::Expired(_) => None,
             InternalCreateRequestError::MissingOhttpConfig => None,
-            InternalCreateRequestError::OhttpEncapsulation(e) => Some(e),
-            InternalCreateRequestError::Hpke(e) => Some(e),
             InternalCreateRequestError::ParseReceiverPubkeyParam(e) => Some(e),
             InternalCreateRequestError::V2CreateRequest(e) => Some(e),
         }
@@ -46,10 +40,6 @@ pub struct FinalizedError(InternalFinalizedError);
 
 #[derive(Debug)]
 pub(crate) enum InternalFinalizedError {
-    CreateRequest(crate::send::v2::CreateRequestError),
-    Encapsulation(OhttpEncapsulationError),
-    Hpke(HpkeError),
-    ParseOhttp(ParseOhttpKeysParamError),
     Response(ResponseError),
     FinalizePsbt(ImplementationError),
     MissingResponse,
@@ -66,10 +56,6 @@ impl Display for FinalizedError {
 impl std::error::Error for FinalizedError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match &self.0 {
-            InternalFinalizedError::CreateRequest(e) => Some(e),
-            InternalFinalizedError::Encapsulation(e) => Some(e),
-            InternalFinalizedError::Hpke(e) => Some(e),
-            InternalFinalizedError::ParseOhttp(_e) => None,
             InternalFinalizedError::Response(e) => Some(e),
             InternalFinalizedError::FinalizePsbt(_e) => None,
             InternalFinalizedError::MissingResponse => None,
