@@ -14,6 +14,7 @@ pub(crate) enum InternalCreateRequestError {
     MissingOhttpConfig,
     ParseReceiverPubkeyParam(ParseReceiverPubkeyParamError),
     V2CreateRequest(crate::send::v2::CreateRequestError),
+    Url(url::ParseError),
 }
 
 impl From<InternalCreateRequestError> for CreateRequestError {
@@ -31,6 +32,7 @@ impl std::error::Error for CreateRequestError {
             InternalCreateRequestError::MissingOhttpConfig => None,
             InternalCreateRequestError::ParseReceiverPubkeyParam(e) => Some(e),
             InternalCreateRequestError::V2CreateRequest(e) => Some(e),
+            InternalCreateRequestError::Url(e) => Some(e),
         }
     }
 }

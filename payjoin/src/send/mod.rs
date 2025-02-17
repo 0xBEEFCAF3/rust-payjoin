@@ -433,7 +433,6 @@ fn serialize_url(
     fee_contribution: Option<AdditionalFeeContribution>,
     min_fee_rate: FeeRate,
     version: &str,
-    opt_in_to_optimistic_merge: bool,
 ) -> Result<Url, url::ParseError> {
     let mut url = endpoint;
     url.query_pairs_mut().append_pair("v", version);
@@ -445,15 +444,16 @@ fn serialize_url(
             .append_pair("additionalfeeoutputindex", &vout.to_string())
             .append_pair("maxadditionalfeecontribution", &max_amount.to_sat().to_string());
     }
-    if opt_in_to_optimistic_merge {
-        url.query_pairs_mut().append_pair("optimisticmerge", "true");
-    }
     if min_fee_rate > FeeRate::ZERO {
         // TODO serialize in rust-bitcoin <https://github.com/rust-bitcoin/rust-bitcoin/pull/1787/files#diff-c2ea40075e93ccd068673873166cfa3312ec7439d6bc5a4cbc03e972c7e045c4>
         let float_fee_rate = min_fee_rate.to_sat_per_kwu() as f32 / 250.0_f32;
         url.query_pairs_mut().append_pair("minfeerate", &float_fee_rate.to_string());
     }
     Ok(url)
+}
+
+fn append_optimisitic_merge_query_param(url: &mut Url) {
+    url.query_pairs_mut().append_pair("optimisticmerge", "true");
 }
 
 #[cfg(test)]
@@ -466,7 +466,7 @@ pub(crate) mod test {
 
     use super::serialize_url;
     use crate::psbt::PsbtExt;
-    use crate::send::AdditionalFeeContribution;
+    use crate::send::{append_optimisitic_merge_query_param, AdditionalFeeContribution};
 
     pub(crate) const ORIGINAL_PSBT: &str = "cHNidP8BAHMCAAAAAY8nutGgJdyYGXWiBEb45Hoe9lWGbkxh/6bNiOJdCDuDAAAAAAD+////AtyVuAUAAAAAF6kUHehJ8GnSdBUOOv6ujXLrWmsJRDCHgIQeAAAAAAAXqRR3QJbbz0hnQ8IvQ0fptGn+votneofTAAAAAAEBIKgb1wUAAAAAF6kU3k4ekGHKWRNbA1rV5tR5kEVDVNCHAQcXFgAUx4pFclNVgo1WWAdN1SYNX8tphTABCGsCRzBEAiB8Q+A6dep+Rz92vhy26lT0AjZn4PRLi8Bf9qoB/CMk0wIgP/Rj2PWZ3gEjUkTlhDRNAQ0gXwTO7t9n+V14pZ6oljUBIQMVmsAaoNWHVMS02LfTSe0e388LNitPa1UQZyOihY+FFgABABYAFEb2Giu6c4KO5YW0pfw3lGp9jMUUAAA=";
     const PAYJOIN_PROPOSAL: &str = "cHNidP8BAJwCAAAAAo8nutGgJdyYGXWiBEb45Hoe9lWGbkxh/6bNiOJdCDuDAAAAAAD+////jye60aAl3JgZdaIERvjkeh72VYZuTGH/ps2I4l0IO4MBAAAAAP7///8CJpW4BQAAAAAXqRQd6EnwadJ0FQ46/q6NcutaawlEMIcACT0AAAAAABepFHdAltvPSGdDwi9DR+m0af6+i2d6h9MAAAAAAQEgqBvXBQAAAAAXqRTeTh6QYcpZE1sDWtXm1HmQRUNU0IcBBBYAFMeKRXJTVYKNVlgHTdUmDV/LaYUwIgYDFZrAGqDVh1TEtNi300ntHt/PCzYrT2tVEGcjooWPhRYYSFzWUDEAAIABAACAAAAAgAEAAAAAAAAAAAEBIICEHgAAAAAAF6kUyPLL+cphRyyI5GTUazV0hF2R2NWHAQcXFgAUX4BmVeWSTJIEwtUb5TlPS/ntohABCGsCRzBEAiBnu3tA3yWlT0WBClsXXS9j69Bt+waCs9JcjWtNjtv7VgIge2VYAaBeLPDB6HGFlpqOENXMldsJezF9Gs5amvDQRDQBIQJl1jz1tBt8hNx2owTm+4Du4isx0pmdKNMNIjjaMHFfrQABABYAFEb2Giu6c4KO5YW0pfw3lGp9jMUUIgICygvBWB5prpfx61y1HDAwo37kYP3YRJBvAjtunBAur3wYSFzWUDEAAIABAACAAAAAgAEAAAABAAAAAAA=";
@@ -529,51 +529,28 @@ pub(crate) mod test {
 
     #[test]
     fn test_disable_output_substitution_query_param() {
-        let url = serialize_url(
-            Url::parse("http://localhost").unwrap(),
-            true,
-            None,
-            FeeRate::ZERO,
-            "2",
-            false,
-        )
-        .unwrap();
+        let url =
+            serialize_url(Url::parse("http://localhost").unwrap(), true, None, FeeRate::ZERO, "2")
+                .unwrap();
         assert_eq!(url, Url::parse("http://localhost?v=2&disableoutputsubstitution=true").unwrap());
 
-        let url = serialize_url(
-            Url::parse("http://localhost").unwrap(),
-            false,
-            None,
-            FeeRate::ZERO,
-            "2",
-            false,
-        )
-        .unwrap();
+        let url =
+            serialize_url(Url::parse("http://localhost").unwrap(), false, None, FeeRate::ZERO, "2")
+                .unwrap();
         assert_eq!(url, Url::parse("http://localhost?v=2").unwrap());
     }
 
     #[test]
     fn test_optimistic_merge_query_param() {
-        let url = serialize_url(
-            Url::parse("http://localhost").unwrap(),
-            false,
-            None,
-            FeeRate::ZERO,
-            "2",
-            true,
-        )
-        .unwrap();
+        let mut url =
+            serialize_url(Url::parse("http://localhost").unwrap(), false, None, FeeRate::ZERO, "2")
+                .unwrap();
+        append_optimisitic_merge_query_param(&mut url);
         assert_eq!(url, Url::parse("http://localhost?v=2&optimisticmerge=true").unwrap());
 
-        let url = serialize_url(
-            Url::parse("http://localhost").unwrap(),
-            false,
-            None,
-            FeeRate::ZERO,
-            "2",
-            false,
-        )
-        .unwrap();
+        let url =
+            serialize_url(Url::parse("http://localhost").unwrap(), false, None, FeeRate::ZERO, "2")
+                .unwrap();
         assert_eq!(url, Url::parse("http://localhost?v=2").unwrap());
     }
 }

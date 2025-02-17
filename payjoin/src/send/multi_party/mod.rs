@@ -7,10 +7,13 @@ use serde::{Deserialize, Serialize};
 use url::Url;
 
 use super::v2::{self, extract_request, EncapsulationError, HpkeContext};
-use super::{BuildSenderError, PsbtContext};
+use super::{
+    append_optimisitic_merge_query_param, serialize_url, AdditionalFeeContribution,
+    BuildSenderError, PsbtContext,
+};
 use crate::ohttp::ohttp_decapsulate;
 use crate::receive::ImplementationError;
-use crate::send::v2::{serialize_v2_body, V2PostContext};
+use crate::send::v2::V2PostContext;
 use crate::uri::UrlExt;
 use crate::{PjUri, Request};
 
@@ -50,9 +53,7 @@ impl Sender {
             self.0.v1.disable_output_substitution,
             self.0.v1.fee_contribution,
             self.0.v1.min_fee_rate,
-            true,
-        )
-        .map_err(InternalCreateRequestError::V2CreateRequest)?;
+        )?;
         let (request, ohttp_ctx) = extract_request(
             ohttp_relay,
             self.0.reply_key.clone(),
@@ -79,6 +80,25 @@ impl Sender {
     }
 }
 
+fn serialize_v2_body(
+    psbt: &Psbt,
+    disable_output_substitution: bool,
+    fee_contribution: Option<AdditionalFeeContribution>,
+    min_fee_rate: FeeRate,
+) -> Result<Vec<u8>, CreateRequestError> {
+    let mut url = serialize_url(
+        Url::parse("http://localhost").unwrap(),
+        disable_output_substitution,
+        fee_contribution,
+        min_fee_rate,
+        "2",
+    )
+    .map_err(InternalCreateRequestError::Url)?;
+    append_optimisitic_merge_query_param(&mut url);
+    let base64 = psbt.to_string();
+    Ok(format!("{}\n{}", base64, url.query().unwrap_or_default()).into_bytes())
+}
+
 /// Post context is used to process the response from the directory and generate
 /// the GET context which can be used to extract a request for the receiver
 pub struct PostContext(v2::V2PostContext);
@@ -90,7 +110,8 @@ impl PostContext {
     }
 }
 
-/// Get context is used to extract a request for the receiver and process the response from the receiver.
+/// Get context is used to extract a request for the receiver. In the multi-party context this is a
+/// merged PSBT with other senders.
 pub struct GetContext(v2::V2GetContext);
 
 impl GetContext {
@@ -103,7 +124,7 @@ impl GetContext {
     }
 
     /// Process the response from the directory. Provide a closure to finalize the inputs
-    /// you own. With the FinalizeContext, you can extract the last POST request and process the response back to the directory.
+    /// you own. With the FinalizeContext, you can extract the last POST request and process the response sent back from the directory.
     pub fn process_response_and_finalize(
         &self,
         response: &[u8],
@@ -126,7 +147,7 @@ impl GetContext {
     }
 }
 
-/// Finalize context is used to extract the last POST request and process the response back to the directory.
+/// Finalize context is used to extract the last POST request and process the response sent back from the directory.
 pub struct FinalizeContext {
     hpke_ctx: HpkeContext,
     directory_url: Url,
@@ -138,9 +159,9 @@ impl FinalizeContext {
         &self,
         ohttp_relay: Url,
     ) -> Result<(Request, ohttp::ClientResponse), CreateRequestError> {
+        // Note: only the psbt is important here, the reciever will ignore the other fields
         let reply_key = self.hpke_ctx.reply_pair.secret_key();
-        let body = serialize_v2_body(&self.psbt, false, None, FeeRate::BROADCAST_MIN, false)
-            .map_err(InternalCreateRequestError::V2CreateRequest)?;
+        let body = serialize_v2_body(&self.psbt, false, None, FeeRate::BROADCAST_MIN)?;
         let mut ohttp_keys = self
             .directory_url
             .ohttp()

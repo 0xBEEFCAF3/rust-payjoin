@@ -155,8 +155,6 @@ impl Sender {
             self.v1.disable_output_substitution,
             self.v1.fee_contribution,
             self.v1.min_fee_rate,
-            #[cfg(feature = "multi-party")]
-            false,
         )?;
         let (request, ohttp_ctx) = extract_request(
             ohttp_relay,
@@ -220,12 +218,11 @@ pub(crate) fn extract_request(
     Ok((request, ohttp_ctx))
 }
 
-pub(crate) fn serialize_v2_body(
+fn serialize_v2_body(
     psbt: &Psbt,
     disable_output_substitution: bool,
     fee_contribution: Option<AdditionalFeeContribution>,
     min_fee_rate: FeeRate,
-    #[cfg(feature = "multi-party")] opt_in_to_optimistic_merge: bool,
 ) -> Result<Vec<u8>, CreateRequestError> {
     // Grug say localhost base be discarded anyway. no big brain needed.
     let placeholder_url = serialize_url(
@@ -234,10 +231,6 @@ pub(crate) fn serialize_v2_body(
         fee_contribution,
         min_fee_rate,
         "2", // payjoin version
-        #[cfg(feature = "multi-party")]
-        opt_in_to_optimistic_merge,
-        #[cfg(not(feature = "multi-party"))]
-        false,
     )
     .map_err(InternalCreateRequestError::Url)?;
     let query_params = placeholder_url.query().unwrap_or_default();
