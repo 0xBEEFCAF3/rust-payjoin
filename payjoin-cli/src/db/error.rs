@@ -13,6 +13,10 @@ pub(crate) enum Error {
     Serialize(serde_json::Error),
     #[cfg(feature = "v2")]
     Deserialize(serde_json::Error),
+    #[cfg(feature = "v2")]
+    NotFound(String),
+    #[cfg(feature = "v2")]
+    FromUtf8(std::string::FromUtf8Error),
 }
 
 impl fmt::Display for Error {
@@ -23,6 +27,10 @@ impl fmt::Display for Error {
             Error::Serialize(e) => write!(f, "Serialization failed: {}", e),
             #[cfg(feature = "v2")]
             Error::Deserialize(e) => write!(f, "Deserialization failed: {}", e),
+            #[cfg(feature = "v2")]
+            Error::NotFound(key) => write!(f, "Key not found: {}", key),
+            #[cfg(feature = "v2")]
+            Error::FromUtf8(e) => write!(f, "String conversion failed: {}", e),
         }
     }
 }

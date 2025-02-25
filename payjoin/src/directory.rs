@@ -27,6 +27,14 @@ impl ShortId {
     pub fn as_slice(&self) -> &[u8] { &self.0 }
 }
 
+impl From<Vec<u8>> for ShortId {
+    fn from(value: Vec<u8>) -> Self { ShortId::try_from(value.as_slice()).unwrap() }
+}
+
+impl Into<Vec<u8>> for ShortId {
+    fn into(self) -> Vec<u8> { self.as_bytes().to_vec() }
+}
+
 impl std::fmt::Display for ShortId {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         let id_hrp = bitcoin::bech32::Hrp::parse("ID").unwrap();
