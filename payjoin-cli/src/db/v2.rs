@@ -1,21 +1,56 @@
+use std::sync::Arc;
+
 use bitcoincore_rpc::jsonrpc::serde_json;
+use payjoin::bitcoin::hex::DisplayHex;
+use payjoin::directory::ShortId;
+use payjoin::persist::{Persister, Token};
 use payjoin::receive::v2::Receiver;
 use payjoin::send::v2::Sender;
+use serde::de::DeserializeOwned;
+use serde::Serialize;
 use sled::{IVec, Tree};
 use url::Url;
 
 use super::*;
 
-impl Database {
-    pub(crate) fn insert_recv_session(&self, session: Receiver) -> Result<()> {
-        let recv_tree = self.0.open_tree("recv_sessions")?;
-        let key = &session.id();
-        let value = serde_json::to_string(&session).map_err(Error::Serialize)?;
-        recv_tree.insert(key.as_slice(), IVec::from(value.as_str()))?;
+#[derive(Clone)]
+pub(crate) struct RecieverPersister(pub Arc<Database>);
+impl Persister for RecieverPersister {
+    type Key = ShortId;
+    type Error = crate::db::error::Error;
+    type Token = ShortId;
+    fn save<V: Serialize, K: Serialize>(
+        &mut self,
+        key: K,
+        value: V,
+    ) -> std::result::Result<Self::Token, Self::Error> {
+        let recv_tree = self.0 .0.open_tree("recv_sessions")?;
+        let value = serde_json::to_string(&value).map_err(Error::Serialize)?;
+        let key_str = serde_json::to_string(&key).map_err(Error::Serialize)?;
+        recv_tree.insert(key_str.as_str(), IVec::from(value.as_str()))?;
         recv_tree.flush()?;
-        Ok(())
+        Ok(serde_json::from_str(&key_str).map_err(Error::Deserialize)?)
     }
+    fn load<T: DeserializeOwned>(
+        &self,
+        token: &Self::Token,
+    ) -> std::result::Result<T, Self::Error> {
+        token.load(self)
+    }
+}
 
+impl Token<RecieverPersister> for ShortId {
+    fn load<T: DeserializeOwned>(
+        &self,
+        persister: &RecieverPersister,
+    ) -> std::result::Result<T, Error> {
+        let recv_tree = persister.0 .0.open_tree("recv_sessions")?;
+        let value = recv_tree.get(self.as_slice())?.ok_or(Error::NotFound(self.as_bytes().to_hex_string(payjoin::bitcoin::hex::Case::Lower)))?;
+        serde_json::from_slice(&value).map_err(Error::Deserialize)
+    }
+}
+
+impl Database {
     pub(crate) fn get_recv_sessions(&self) -> Result<Vec<Receiver>> {
         let recv_tree = self.0.open_tree("recv_sessions")?;
         let mut sessions = Vec::new();
