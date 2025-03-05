@@ -174,7 +174,7 @@ mod integration {
         use payjoin::receive::v2::{
             NoopPersister as ReceiverNoopPersister, PayjoinProposal, Receiver, UncheckedProposal,
         };
-        use payjoin::send::v2::SenderBuilder;
+        use payjoin::send::v2::{NoopPersister as SenderNoopPersister, SenderBuilder};
         use payjoin::{OhttpKeys, PjUri, UriExt};
         use payjoin_test_utils::{BoxSendSyncError, TestServices};
         use reqwest::{Client, Response};
@@ -266,8 +266,9 @@ mod integration {
                 // Inside the Sender:
                 let psbt = build_original_psbt(&sender, &expired_receiver.pj_uri())?;
                 // Test that an expired pj_url errors
-                let expired_req_ctx = SenderBuilder::new(psbt, expired_receiver.pj_uri())
-                    .build_non_incentivizing(FeeRate::BROADCAST_MIN)?;
+                let expired_req_ctx =
+                    SenderBuilder::new(psbt, expired_receiver.pj_uri(), SenderNoopPersister)
+                        .build_non_incentivizing(FeeRate::BROADCAST_MIN)?;
                 match expired_req_ctx.extract_v2(ohttp_relay) {
                     // Internal error types are private, so check against a string
                     Err(err) => assert!(err.to_string().contains("expired")),
@@ -334,7 +335,7 @@ mod integration {
                     .check_pj_supported()
                     .map_err(|e| e.to_string())?;
                 let psbt = build_sweep_psbt(&sender, &pj_uri)?;
-                let req_ctx = SenderBuilder::new(psbt.clone(), pj_uri.clone())
+                let req_ctx = SenderBuilder::new(psbt.clone(), pj_uri.clone(), SenderNoopPersister)
                     .build_recommended(FeeRate::BROADCAST_MIN)?;
                 let (Request { url, body, content_type, .. }, send_ctx) =
                     req_ctx.extract_v2(ohttp_relay.to_owned())?;
@@ -429,7 +430,7 @@ mod integration {
                 .check_pj_supported()
                 .map_err(|e| e.to_string())?;
             let psbt = build_original_psbt(&sender, &pj_uri)?;
-            let req_ctx = SenderBuilder::new(psbt.clone(), pj_uri.clone())
+            let req_ctx = SenderBuilder::new(psbt.clone(), pj_uri.clone(), SenderNoopPersister)
                 .build_recommended(FeeRate::BROADCAST_MIN)?;
             let (req, ctx) = req_ctx.extract_v1();
             let headers = HeaderMock::new(&req.body, req.content_type);
@@ -496,7 +497,7 @@ mod integration {
                     .map_err(|e| e.to_string())?;
                 let psbt = build_original_psbt(&sender, &pj_uri)?;
                 let (Request { url, body, content_type, .. }, send_ctx) =
-                    SenderBuilder::new(psbt, pj_uri)
+                    SenderBuilder::new(psbt, pj_uri, SenderNoopPersister)
                         .build_with_additional_fee(
                             Amount::from_sat(10000),
                             None,
@@ -707,7 +708,7 @@ mod integration {
     #[cfg(feature = "_multiparty")]
     mod multiparty {
         use bitcoin::ScriptBuf;
-        use payjoin::receive::v2::{NoopPersister, Receiver};
+        use payjoin::receive::v2::{NoopPersister as ReceiverNoopPersister, Receiver};
         use payjoin::send::multiparty::{
             GetContext as MultiPartyGetContext, SenderBuilder as MultiPartySenderBuilder,
         };
@@ -760,7 +761,7 @@ mod integration {
                         directory.clone(),
                         ohttp_keys.clone(),
                         None,
-                        NoopPersister,
+                        ReceiverNoopPersister,
                     )?;
                     let pj_uri = receiver_session.pj_uri();
                     let psbt = build_sweep_psbt(sender, &pj_uri)?;
