@@ -11,6 +11,7 @@ use super::{serialize_url, AdditionalFeeContribution, BuildSenderError, Internal
 use crate::hpke::decrypt_message_b;
 use crate::ohttp::ohttp_decapsulate;
 use crate::output_substitution::OutputSubstitution;
+use crate::persist::Persister;
 use crate::receive::ImplementationError;
 use crate::send::v2::V2PostContext;
 use crate::uri::UrlExt;
@@ -19,14 +20,24 @@ use crate::{PjUri, Request};
 mod error;
 
 #[derive(Clone)]
-pub struct SenderBuilder<'a>(v2::SenderBuilder<'a>);
+pub struct SenderBuilder<'a>(pub crate::send::v2::SenderBuilder<'a>);
 
 impl<'a> SenderBuilder<'a> {
-    pub fn new(psbt: Psbt, uri: PjUri<'a>) -> Self { Self(v2::SenderBuilder::new(psbt, uri)) }
-    pub fn build_recommended(self, min_fee_rate: FeeRate) -> Result<Sender, BuildSenderError> {
-        let v2 = v2::SenderBuilder::new(self.0 .0.psbt, self.0 .0.uri)
-            .build_recommended(min_fee_rate)?;
-        Ok(Sender(v2))
+    pub fn new(psbt: Psbt, uri: PjUri<'a>) -> Self {
+        Self(crate::send::v2::SenderBuilder::new(psbt, uri))
+    }
+
+    pub fn build_recommended(self, min_fee_rate: FeeRate) -> Result<NewSender, BuildSenderError> {
+        let sender = self.0.build_recommended(min_fee_rate)?;
+        Ok(NewSender(sender))
+    }
+}
+
+pub struct NewSender(v2::NewSender);
+
+impl NewSender {
+    pub fn persist<P: Persister>(&self, persister: &mut P) -> Result<P::Token, P::Error> {
+        self.0.persist(persister).map_err(|e| todo!())
     }
 }
 
@@ -34,6 +45,9 @@ impl<'a> SenderBuilder<'a> {
 pub struct Sender(v2::Sender);
 
 impl Sender {
+    pub fn load<P: Persister>(token: &P::Token, persister: &P) -> Result<Self, P::Error> {
+        persister.load(token).map_err(|e| todo!())
+    }
     pub fn extract_v2(
         &self,
         ohttp_relay: Url,
