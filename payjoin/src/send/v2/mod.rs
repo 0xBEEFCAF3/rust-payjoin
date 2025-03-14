@@ -33,6 +33,7 @@ use super::*;
 use crate::hpke::{decrypt_message_b, encrypt_message_a, HpkeSecretKey};
 use crate::ohttp::{ohttp_decapsulate, ohttp_encapsulate};
 use crate::send::v1;
+use crate::traits::Jsonable;
 use crate::uri::{ShortId, UrlExt};
 use crate::{HpkeKeyPair, HpkePublicKey, IntoUrl, OhttpKeys, PjUri, Request};
 
@@ -191,6 +192,10 @@ impl Sender {
     pub fn endpoint(&self) -> &Url { self.v1.endpoint() }
 }
 
+impl Jsonable for Sender {
+    fn to_json(&self) -> Result<String, serde_json::Error> { serde_json::to_string(self) }
+    fn from_json(json: &str) -> Result<Self, serde_json::Error> { serde_json::from_str(json) }
+}
 pub(crate) fn extract_request(
     ohttp_relay: Url,
     reply_key: HpkeSecretKey,

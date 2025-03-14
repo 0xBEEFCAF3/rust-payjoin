@@ -19,6 +19,7 @@ use super::{
 use crate::hpke::{decrypt_message_a, encrypt_message_b, HpkeKeyPair, HpkePublicKey};
 use crate::ohttp::{ohttp_decapsulate, ohttp_encapsulate, OhttpEncapsulationError, OhttpKeys};
 use crate::receive::{parse_payload, InputPair};
+use crate::traits::Jsonable;
 use crate::uri::ShortId;
 use crate::{IntoUrl, IntoUrlError, Request};
 
@@ -204,6 +205,11 @@ impl Receiver {
 
     /// The per-session identifier
     pub fn id(&self) -> ShortId { id(&self.context.s) }
+}
+
+impl Jsonable for Receiver {
+    fn to_json(&self) -> Result<String, serde_json::Error> { serde_json::to_string(self) }
+    fn from_json(json: &str) -> Result<Self, serde_json::Error> { serde_json::from_str(json) }
 }
 
 /// The sender's original PSBT and optional parameters

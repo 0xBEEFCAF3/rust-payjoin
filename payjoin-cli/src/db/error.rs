@@ -1,4 +1,5 @@
 use std::fmt;
+use std::str::Utf8Error;
 
 #[cfg(feature = "v2")]
 use bitcoincore_rpc::jsonrpc::serde_json;
@@ -13,6 +14,8 @@ pub(crate) enum Error {
     Serialize(serde_json::Error),
     #[cfg(feature = "v2")]
     Deserialize(serde_json::Error),
+    #[cfg(feature = "v2")]
+    Utf8(Utf8Error),
 }
 
 impl fmt::Display for Error {
@@ -23,6 +26,8 @@ impl fmt::Display for Error {
             Error::Serialize(e) => write!(f, "Serialization failed: {}", e),
             #[cfg(feature = "v2")]
             Error::Deserialize(e) => write!(f, "Deserialization failed: {}", e),
+            #[cfg(feature = "v2")]
+            Error::Utf8(e) => write!(f, "UTF-8 conversion failed: {}", e),
         }
     }
 }
