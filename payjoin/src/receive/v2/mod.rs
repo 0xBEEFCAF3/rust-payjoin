@@ -298,7 +298,7 @@ where
 
     /// The response can either be an UncheckedProposal or an ACCEPTED message
     /// indicating no UncheckedProposal is available yet.
-    pub fn process_res(
+    pub fn process_get_res(
         &mut self,
         body: &[u8],
         context: ohttp::ClientResponse,
@@ -488,6 +488,283 @@ where
         match response.status() {
             http::StatusCode::OK => Ok(()),
             _ => Err(InternalSessionError::UnexpectedStatusCode(response.status()).into()),
+        }
+    }
+}
+
+impl<S, P> NewReceiver<S, P>
+where
+    S: Into<MaybeInputsOwned> + Clone,
+    P: Persister + Clone,
+    P::Key: From<ShortId>,
+{
+    /// Check that the Original PSBT has no receiver-owned inputs.
+    /// Return original-psbt-rejected error or otherwise refuse to sign undesirable inputs.
+    ///
+    /// An attacker could try to spend receiver's own inputs. This check prevents that.
+    pub fn check_inputs_not_owned(
+        self,
+        is_owned: impl Fn(&Script) -> Result<bool, ImplementationError>,
+    ) -> Result<NewReceiver<MaybeInputsSeen, P>, ReplyableError> {
+        let state = self.state.clone().into();
+        let inner = state.v1.check_inputs_not_owned(is_owned)?;
+        let new_state = MaybeInputsSeen { v1: inner, context: state.context };
+        Ok(NewReceiver { state: new_state, persister: self.persister.clone() })
+    }
+}
+
+impl<S, P> NewReceiver<S, P>
+where
+    S: Into<MaybeInputsSeen> + Clone,
+    P: Persister + Clone,
+    P::Key: From<ShortId>,
+{
+    /// Make sure that the original transaction inputs have never been seen before.
+    /// This prevents probing attacks. This prevents reentrant Payjoin, where a sender
+    /// proposes a Payjoin PSBT as a new Original PSBT for a new Payjoin.
+    pub fn check_no_inputs_seen_before(
+        self,
+        is_known: impl Fn(&OutPoint) -> Result<bool, ImplementationError>,
+    ) -> Result<NewReceiver<OutputsUnknown, P>, ReplyableError> {
+        let state = self.state.clone().into();
+        let inner = state.v1.check_no_inputs_seen_before(is_known)?;
+        let new_state = OutputsUnknown { inner, context: state.context };
+        Ok(NewReceiver { state: new_state, persister: self.persister.clone() })
+    }
+}
+
+impl<S, P> NewReceiver<S, P>
+where
+    S: Into<OutputsUnknown> + Clone,
+    P: Persister + Clone,
+    P::Key: From<ShortId>,
+{
+    /// Find which outputs belong to the receiver
+    pub fn identify_receiver_outputs(
+        self,
+        is_receiver_output: impl Fn(&Script) -> Result<bool, ImplementationError>,
+    ) -> Result<NewReceiver<WantsOutputs, P>, ReplyableError> {
+        let state = self.state.clone().into();
+        let inner = state.inner.identify_receiver_outputs(is_receiver_output)?;
+        let new_state = WantsOutputs { v1: inner, context: state.context };
+        Ok(NewReceiver { state: new_state, persister: self.persister.clone() })
+    }
+}
+
+impl<S, P> NewReceiver<S, P>
+where
+    S: Into<WantsOutputs> + Clone,
+    P: Persister + Clone,
+    P::Key: From<ShortId>,
+{
+    pub fn is_output_substitution_disabled(&self) -> bool {
+        let state = self.state.clone().into();
+        state.v1.is_output_substitution_disabled()
+    }
+
+    /// Substitute the receiver output script with the provided script.
+    pub fn substitute_receiver_script(
+        self,
+        output_script: &Script,
+    ) -> Result<NewReceiver<WantsOutputs, P>, OutputSubstitutionError> {
+        let state = self.state.clone().into();
+        let inner = state.v1.substitute_receiver_script(output_script)?;
+        Ok(NewReceiver {
+            state: WantsOutputs { v1: inner, context: state.context },
+            persister: self.persister.clone(),
+        })
+    }
+
+    /// Replace **all** receiver outputs with one or more provided outputs.
+    /// The drain script specifies which address to *drain* coins to. An output corresponding to
+    /// that address must be included in `replacement_outputs`. The value of that output may be
+    /// increased or decreased depending on the receiver's input contributions and whether the
+    /// receiver needs to pay for additional miner fees (e.g. in the case of adding many outputs).
+    pub fn replace_receiver_outputs(
+        self,
+        replacement_outputs: impl Iterator<Item = TxOut>,
+        drain_script: &Script,
+    ) -> Result<NewReceiver<WantsOutputs, P>, OutputSubstitutionError> {
+        let state = self.state.clone().into();
+        let inner = state.v1.replace_receiver_outputs(replacement_outputs, drain_script)?;
+        Ok(NewReceiver {
+            state: WantsOutputs { v1: inner, context: state.context },
+            persister: self.persister.clone(),
+        })
+    }
+
+    /// Proceed to the input contribution step.
+    /// Outputs cannot be modified after this function is called.
+    pub fn commit_outputs(self) -> NewReceiver<WantsInputs, P> {
+        let state = self.state.clone().into();
+        let inner = state.v1.commit_outputs();
+        NewReceiver {
+            state: WantsInputs { v1: inner, context: state.context },
+            persister: self.persister.clone(),
+        }
+    }
+}
+
+impl<S, P> NewReceiver<S, P>
+where
+    S: Into<WantsInputs> + Clone,
+    P: Persister + Clone,
+    P::Key: From<ShortId>,
+{
+    /// Select receiver input such that the payjoin avoids surveillance.
+    /// Return the input chosen that has been applied to the Proposal.
+    ///
+    /// Proper coin selection allows payjoin to resemble ordinary transactions.
+    /// To ensure the resemblance, a number of heuristics must be avoided.
+    ///
+    /// UIH "Unnecessary input heuristic" is one class of them to avoid. We define
+    /// UIH1 and UIH2 according to the BlockSci practice
+    /// BlockSci UIH1 and UIH2:
+    /// if min(in) > min(out) then UIH1 else UIH2
+    /// <https://eprint.iacr.org/2022/589.pdf>
+    pub fn try_preserving_privacy(
+        &self,
+        candidate_inputs: impl IntoIterator<Item = InputPair>,
+    ) -> Result<InputPair, SelectionError> {
+        let state = self.state.clone().into();
+        state.v1.try_preserving_privacy(candidate_inputs)
+    }
+
+    /// Add the provided list of inputs to the transaction.
+    /// Any excess input amount is added to the change_vout output indicated previously.
+    pub fn contribute_inputs(
+        self,
+        inputs: impl IntoIterator<Item = InputPair>,
+    ) -> Result<WantsInputs, InputContributionError> {
+        let state = self.state.clone().into();
+        let inner = state.v1.contribute_inputs(inputs)?;
+        Ok(WantsInputs { v1: inner, context: state.context })
+    }
+
+    /// Proceed to the proposal finalization step.
+    /// Inputs cannot be modified after this function is called.
+    pub fn commit_inputs(self) -> NewReceiver<ProvisionalProposal, P> {
+        let state = self.state.clone().into();
+        let inner = state.v1.commit_inputs();
+        NewReceiver {
+            state: ProvisionalProposal { v1: inner, context: state.context },
+            persister: self.persister.clone(),
+        }
+    }
+}
+
+impl<S, P> NewReceiver<S, P>
+where
+    S: Into<ProvisionalProposal> + Clone,
+    P: Persister + Clone,
+    P::Key: From<ShortId>,
+{
+    pub fn finalize_proposal(
+        self,
+        wallet_process_psbt: impl Fn(&Psbt) -> Result<Psbt, ImplementationError>,
+        min_fee_rate: Option<FeeRate>,
+        max_effective_fee_rate: Option<FeeRate>,
+    ) -> Result<NewReceiver<PayjoinProposal, P>, ReplyableError> {
+        let state = self.state.clone().into();
+        let inner = state.v1.finalize_proposal(
+            wallet_process_psbt,
+            min_fee_rate,
+            max_effective_fee_rate,
+        )?;
+        Ok(NewReceiver {
+            state: PayjoinProposal { v1: inner, context: state.context },
+            persister: self.persister.clone(),
+        })
+    }
+}
+
+impl<S, P> NewReceiver<S, P>
+where
+    S: Into<PayjoinProposal> + Clone,
+    P: Persister + Clone,
+    P::Key: From<ShortId>,
+{
+    #[cfg(feature = "_multiparty")]
+    // TODO hack to get multi party working. A better solution would be to allow extract_v2_req to be separate from the rest of the v2 context
+    pub(crate) fn new_payjoin_proposal(v1: v1::PayjoinProposal, context: SessionContext) -> PayjoinProposal {
+        PayjoinProposal { v1, context }
+    }
+
+    // pub fn utxos_to_be_locked(&self) -> impl '_ + Iterator<Item = &bitcoin::OutPoint> {
+    //     let state = self.state.clone().into();
+    //     state.v1.utxos_to_be_locked()
+    // }
+
+    // pub fn psbt(&self) -> &Psbt { 
+    //     let state = self.state.clone().into();
+    //     let psbt = state.v1.psbt();
+    //     psbt
+    // }
+
+    pub fn extract_v2_req(
+        &mut self,
+        ohttp_relay: impl IntoUrl,
+    ) -> Result<(Request, ohttp::ClientResponse), Error> {
+        let target_resource: Url;
+        let body: Vec<u8>;
+        let method: &str;
+
+        let mut state = self.state.clone().into();
+
+        if let Some(e) = &state.context.e {
+            // Prepare v2 payload
+            let payjoin_bytes = state.v1.psbt().serialize();
+            let sender_subdir = subdir_path_from_pubkey(e);
+            target_resource = state
+                .context
+                .directory
+                .join(&sender_subdir.to_string())
+                .map_err(|e| ReplyableError::Implementation(e.into()))?;
+            body = encrypt_message_b(payjoin_bytes, &state.context.s, e)?;
+            method = "POST";
+        } else {
+            // Prepare v2 wrapped and backwards-compatible v1 payload
+            body = state.v1.psbt().to_string().as_bytes().to_vec();
+            let receiver_subdir = subdir_path_from_pubkey(state.context.s.public_key());
+            target_resource = state
+                .context
+                .directory
+                .join(&receiver_subdir.to_string())
+                .map_err(|e| ReplyableError::Implementation(e.into()))?;
+            method = "PUT";
+        }
+        log::debug!("Payjoin PSBT target: {}", target_resource.as_str());
+        let (body, ctx) = ohttp_encapsulate(
+            &mut state.context.ohttp_keys,
+            method,
+            target_resource.as_str(),
+            Some(&body),
+        )?;
+
+        let req = Request::new_v2(&state.context.full_relay_url(ohttp_relay)?, &body);
+        Ok((req, ctx))
+    }
+
+    /// Processes the response for the final POST message from the receiver client in the v2 Payjoin protocol.
+    ///
+    /// This function decapsulates the response using the provided OHTTP context. If the response status is successful,
+    /// it indicates that the Payjoin proposal has been accepted. Otherwise, it returns an error with the status code.
+    ///
+    /// After this function is called, the receiver can either wait for the Payjoin transaction to be broadcast or
+    /// choose to broadcast the original PSBT.
+    pub fn process_res(
+        &self,
+        res: &[u8],
+        ohttp_context: ohttp::ClientResponse,
+    ) -> Result<(), Error> {
+        let response_array: &[u8; crate::directory::ENCAPSULATED_MESSAGE_BYTES] =
+            res.try_into().map_err(|_| InternalSessionError::UnexpectedResponseSize(res.len()))?;
+        let res = ohttp_decapsulate(ohttp_context, response_array)
+            .map_err(InternalSessionError::OhttpEncapsulation)?;
+        if res.status().is_success() {
+            Ok(())
+        } else {
+            Err(InternalSessionError::UnexpectedStatusCode(res.status()).into())
         }
     }
 }
