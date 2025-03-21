@@ -237,15 +237,18 @@ pub struct UninitializedReceiver {
     context: SessionContext,
 }
 
+trait State {}
+
 #[derive(Debug, Clone)]
-pub struct NewReceiver<S, P> {
-    pub(crate) state: S,
+pub struct NewReceiver<State, P> {
+    pub(crate) state: State,
     pub(crate) persister: P,
 }
 
-impl<S, P> NewReceiver<S, P>
+impl State for UninitializedReceiver {}
+
+impl<P> NewReceiver<UninitializedReceiver, P>
 where
-    S: Into<UninitializedReceiver> + From<UninitializedReceiver> + Clone,
     P: Persister + Clone,
     P::Key: From<ShortId>,
 {
@@ -286,13 +289,12 @@ where
         &mut self,
         ohttp_relay: impl IntoUrl,
     ) -> Result<(Request, ohttp::ClientResponse), Error> {
-        let state = self.state.clone().into();
-        if SystemTime::now() > state.context.expiry {
-            return Err(InternalSessionError::Expired(state.context.expiry).into());
+        if SystemTime::now() > self.state.context.expiry {
+            return Err(InternalSessionError::Expired(self.state.context.expiry).into());
         }
         let (body, ohttp_ctx) =
             self.fallback_req_body().map_err(InternalSessionError::OhttpEncapsulation)?;
-        let req = Request::new_v2(&state.context.full_relay_url(ohttp_relay)?, &body);
+        let req = Request::new_v2(&self.state.context.full_relay_url(ohttp_relay)?, &body);
         Ok((req, ohttp_ctx))
     }
 
