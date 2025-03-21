@@ -170,7 +170,8 @@ mod integration {
         use bitcoin::Address;
         use http::StatusCode;
         use payjoin::receive::v2::{
-            NoopPersister as ReceiverNoopPersister, PayjoinProposal, Receiver, UncheckedProposal,
+            NewReceiver, NoopPersister as ReceiverNoopPersister, NoopPersisterError,
+            PayjoinProposal, Receiver, UncheckedProposal, UninitializedReceiver,
         };
         use payjoin::send::v2::{NoopPersister as SenderNoopPersister, SenderBuilder};
         use payjoin::{OhttpKeys, PjUri, UriExt};
@@ -304,13 +305,21 @@ mod integration {
                 let address = receiver.get_new_address(None, None)?.assume_checked();
 
                 // test session with expiry in the future
-                let mut session = Receiver::new(
-                    address.clone(),
-                    directory.clone(),
-                    ohttp_keys.clone(),
+                let mut session = NewReceiver::<UninitializedReceiver, ReceiverNoopPersister>::new(
+                    address,
+                    directory,
+                    ohttp_keys,
                     None,
                     NOOP_RECEIVER_PERSISTER,
                 )?;
+
+                // let mut session = Receiver::new(
+                //     address.clone(),
+                //     directory.clone(),
+                //     ohttp_keys.clone(),
+                //     None,
+                //     NOOP_RECEIVER_PERSISTER,
+                // )?;
                 println!("session: {:#?}", &session);
                 // Poll receive request
                 let ohttp_relay = services.ohttp_relay_url();
