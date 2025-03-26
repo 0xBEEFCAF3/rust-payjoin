@@ -4,7 +4,7 @@ use anyhow::{anyhow, Context, Result};
 use payjoin::bitcoin::consensus::encode::serialize_hex;
 use payjoin::bitcoin::psbt::Psbt;
 use payjoin::bitcoin::{Amount, FeeRate};
-use payjoin::receive::v2::{Receiver, UncheckedProposal};
+use payjoin::receive::v2::{NewReceiver, Receiver, UncheckedProposal};
 use payjoin::receive::{Error, ImplementationError, ReplyableError};
 use payjoin::send::v2::{Sender, SenderBuilder};
 use payjoin::Uri;
@@ -53,11 +53,12 @@ impl AppTrait for App {
             Some(send_session) => send_session,
             None => {
                 let psbt = self.create_original_psbt(&uri, fee_rate)?;
-                let persister = SenderPersister(self.db.clone());
-                let req_ctx = SenderBuilder::new(psbt, uri.clone(), persister)
+                let mut persister = SenderPersister(self.db.clone());
+                let new_sender = SenderBuilder::new(psbt, uri.clone())
                     .build_recommended(fee_rate)
                     .with_context(|| "Failed to build payjoin request")?;
-                req_ctx
+                let persistence_token = new_sender.persist(&mut persister)?;
+                persistence_token.load(persister)?
             }
         };
         self.spawn_payjoin_sender(req_ctx).await
@@ -66,14 +67,15 @@ impl AppTrait for App {
     async fn receive_payjoin(&self, amount: Amount) -> Result<()> {
         let address = self.wallet().get_new_address()?;
         let ohttp_keys = unwrap_ohttp_keys_or_else_fetch(&self.config).await?;
-        let persister = RecieverPersister(self.db.clone());
-        let session = Receiver::new(
+        let mut persister = RecieverPersister(self.db.clone());
+        let session = NewReceiver::new(
             address,
             self.config.v2()?.pj_directory.clone(),
             ohttp_keys.clone(),
             None,
-            persister,
         )?;
+        let token = session.persist(&mut persister)?;
+        let session = token.load(persister)?;
         self.spawn_payjoin_receiver(session, Some(amount)).await
     }
 

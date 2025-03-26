@@ -9,7 +9,7 @@ use crate::error_codes::{
 };
 #[cfg(feature = "v2")]
 #[derive(Debug)]
-pub(crate) struct ErrorBox(Box<dyn std::error::Error + Send + Sync>);
+pub struct ErrorBox(Box<dyn std::error::Error + Send + Sync>);
 
 #[cfg(feature = "v2")]
 impl ErrorBox {
@@ -22,6 +22,14 @@ impl ErrorBox {
 impl PartialEq for ErrorBox {
     fn eq(&self, other: &Self) -> bool { self.0.to_string() == other.0.to_string() }
 }
+
+#[cfg(feature = "v2")]
+impl std::fmt::Display for ErrorBox {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result { write!(f, "{}", self.0) }
+}
+
+#[cfg(feature = "v2")]
+impl std::error::Error for ErrorBox {}
 
 /// Error building a Sender from a SenderBuilder.
 ///
@@ -46,6 +54,8 @@ pub(crate) enum InternalBuildSenderError {
     AddressType(crate::psbt::AddressTypeError),
     #[cfg(feature = "v2")]
     FailedToPersistSender(ErrorBox),
+    #[cfg(feature = "v2")]
+    FailedToLoadSender(ErrorBox),
 }
 
 impl From<InternalBuildSenderError> for BuildSenderError {
@@ -78,6 +88,8 @@ impl fmt::Display for BuildSenderError {
             InputWeight(e) => write!(f, "can not determine expected input weight: {}", e),
             #[cfg(feature = "v2")]
             FailedToPersistSender(e) => write!(f, "failed to persist sender: {:#?}", e),
+            #[cfg(feature = "v2")]
+            FailedToLoadSender(e) => write!(f, "failed to load sender: {:#?}", e),
         }
     }
 }
@@ -102,6 +114,8 @@ impl std::error::Error for BuildSenderError {
             InputWeight(error) => Some(error),
             #[cfg(feature = "v2")]
             FailedToPersistSender(e) => e.0.source(),
+            #[cfg(feature = "v2")]
+            FailedToLoadSender(e) => e.0.source(),
         }
     }
 }
