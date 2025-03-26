@@ -5,6 +5,7 @@ use payjoin::directory::ShortId;
 use payjoin::persist::Persister;
 use payjoin::receive::v2::Receiver;
 use payjoin::send::v2::Sender;
+use serde::de::DeserializeOwned;
 use serde::Serialize;
 use sled::{IVec, Tree};
 use url::Url;
@@ -16,12 +17,22 @@ pub(crate) struct SenderPersister(pub Arc<Database>);
 impl Persister for SenderPersister {
     type Key = Url;
     type Error = crate::db::error::Error;
-    fn save<T: Serialize>(&self, key: Self::Key, value: T) -> std::result::Result<(), Self::Error> {
+    fn save<T: Serialize>(
+        &mut self,
+        key: Self::Key,
+        value: T,
+    ) -> std::result::Result<(), Self::Error> {
         let send_tree = self.0 .0.open_tree("send_sessions")?;
         let value = serde_json::to_string(&value).map_err(Error::Serialize)?;
         send_tree.insert(key.to_string(), IVec::from(value.as_str()))?;
         send_tree.flush()?;
         Ok(())
+    }
+    fn load<T: DeserializeOwned>(&self, key: Self::Key) -> std::result::Result<T, Self::Error> {
+        let send_tree = self.0 .0.open_tree("send_sessions")?;
+        let value = send_tree.get(key.to_string())?.unwrap();
+        let value = serde_json::from_slice(&value).map_err(Error::Deserialize)?;
+        Ok(value)
     }
 }
 
@@ -30,12 +41,22 @@ pub(crate) struct RecieverPersister(pub Arc<Database>);
 impl Persister for RecieverPersister {
     type Key = ShortId;
     type Error = crate::db::error::Error;
-    fn save<T: Serialize>(&self, key: Self::Key, value: T) -> std::result::Result<(), Self::Error> {
+    fn save<T: Serialize>(
+        &mut self,
+        key: Self::Key,
+        value: T,
+    ) -> std::result::Result<(), Self::Error> {
         let recv_tree = self.0 .0.open_tree("recv_sessions")?;
         let value = serde_json::to_string(&value).map_err(Error::Serialize)?;
         recv_tree.insert(key.as_slice(), IVec::from(value.as_str()))?;
         recv_tree.flush()?;
         Ok(())
+    }
+    fn load<T: DeserializeOwned>(&self, key: Self::Key) -> std::result::Result<T, Self::Error> {
+        let recv_tree = self.0 .0.open_tree("recv_sessions")?;
+        let value = recv_tree.get(key.as_slice())?.unwrap();
+        let value = serde_json::from_slice(&value).map_err(Error::Deserialize)?;
+        Ok(value)
     }
 }
 

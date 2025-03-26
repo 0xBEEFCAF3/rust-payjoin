@@ -7,7 +7,10 @@ use serde::{Deserialize, Serialize};
 use url::Url;
 
 use super::v2::{self, extract_request, EncapsulationError, HpkeContext};
-use super::{serialize_url, AdditionalFeeContribution, BuildSenderError, InternalResult};
+use super::{
+    serialize_url, AdditionalFeeContribution, BuildSenderError, InternalBuildSenderError,
+    InternalResult,
+};
 use crate::hpke::decrypt_message_b;
 use crate::ohttp::ohttp_decapsulate;
 use crate::output_substitution::OutputSubstitution;
@@ -19,16 +22,22 @@ use crate::{PjUri, Request};
 mod error;
 
 #[derive(Clone)]
-pub struct SenderBuilder<'a>(pub crate::send::v2::SenderBuilder<'a, NoopPersister>);
+pub struct SenderBuilder<'a>(pub crate::send::v2::SenderBuilder<'a>);
 
 impl<'a> SenderBuilder<'a> {
     pub fn new(psbt: Psbt, uri: PjUri<'a>) -> Self {
-        Self(crate::send::v2::SenderBuilder::new(psbt, uri, NoopPersister))
+        Self(crate::send::v2::SenderBuilder::new(psbt, uri))
     }
 
     pub fn build_recommended(self, min_fee_rate: FeeRate) -> Result<Sender, BuildSenderError> {
         let v2 = self.0.build_recommended(min_fee_rate)?;
-        Ok(Sender(v2))
+        let mut persister = NoopPersister::default();
+        let persistence_token =
+            v2.persist(&mut persister).map_err(InternalBuildSenderError::FailedToPersistSender)?;
+        let sender = persistence_token
+            .load(persister)
+            .map_err(InternalBuildSenderError::FailedToLoadSender)?;
+        Ok(Sender(sender))
     }
 }
 

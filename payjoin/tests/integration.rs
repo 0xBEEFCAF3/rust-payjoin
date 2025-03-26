@@ -172,7 +172,7 @@ mod integration {
         use bitcoin::Address;
         use http::StatusCode;
         use payjoin::receive::v2::{
-            NoopPersister as ReceiverNoopPersister, PayjoinProposal, Receiver, UncheckedProposal,
+            NewReceiver, NoopPersister as ReceiverNoopPersister, PayjoinProposal, UncheckedProposal,
         };
         use payjoin::send::v2::{NoopPersister as SenderNoopPersister, SenderBuilder};
         use payjoin::{OhttpKeys, PjUri, UriExt};
@@ -207,13 +207,10 @@ mod integration {
                 let ohttp_relay = services.ohttp_relay_url();
                 let mock_address = Address::from_str("tb1q6d3a2w975yny0asuvd9a67ner4nks58ff0q8g4")?
                     .assume_checked();
-                let mut bad_initializer = Receiver::new(
-                    mock_address,
-                    directory,
-                    bad_ohttp_keys,
-                    None,
-                    ReceiverNoopPersister,
-                )?;
+                let new_receiver = NewReceiver::new(mock_address, directory, bad_ohttp_keys, None)?;
+                let mut noop_persister = ReceiverNoopPersister::default();
+                let storage_token = new_receiver.persist(&mut noop_persister)?;
+                let mut bad_initializer = storage_token.load(noop_persister)?;
                 let (req, _ctx) = bad_initializer.extract_req(&ohttp_relay)?;
                 agent
                     .post(req.url)
@@ -249,13 +246,15 @@ mod integration {
                 // Inside the Receiver:
                 let address = receiver.get_new_address(None, None)?.assume_checked();
                 // test session with expiry in the past
-                let mut expired_receiver = Receiver::new(
+                let expired_receiver = NewReceiver::new(
                     address.clone(),
                     directory.clone(),
                     ohttp_keys.clone(),
                     Some(Duration::from_secs(0)),
-                    ReceiverNoopPersister,
                 )?;
+                let mut noop_receiver_persister = ReceiverNoopPersister::default();
+                let storage_token = expired_receiver.persist(&mut noop_receiver_persister)?;
+                let mut expired_receiver = storage_token.load(noop_receiver_persister)?;
                 match expired_receiver.extract_req(&ohttp_relay) {
                     // Internal error types are private, so check against a string
                     Err(err) => assert!(err.to_string().contains("expired")),
@@ -265,10 +264,12 @@ mod integration {
                 // **********************
                 // Inside the Sender:
                 let psbt = build_original_psbt(&sender, &expired_receiver.pj_uri())?;
+                let mut noop_sender_persister = SenderNoopPersister::default();
                 // Test that an expired pj_url errors
-                let expired_req_ctx =
-                    SenderBuilder::new(psbt, expired_receiver.pj_uri(), SenderNoopPersister)
-                        .build_non_incentivizing(FeeRate::BROADCAST_MIN)?;
+                let new_sender = SenderBuilder::new(psbt, expired_receiver.pj_uri())
+                    .build_non_incentivizing(FeeRate::BROADCAST_MIN)?;
+                let persistence_token = new_sender.persist(&mut noop_sender_persister)?;
+                let expired_req_ctx = persistence_token.load(noop_sender_persister)?;
                 match expired_req_ctx.extract_v2(ohttp_relay) {
                     // Internal error types are private, so check against a string
                     Err(err) => assert!(err.to_string().contains("expired")),
@@ -303,13 +304,11 @@ mod integration {
                 let address = receiver.get_new_address(None, None)?.assume_checked();
 
                 // test session with expiry in the future
-                let mut session = Receiver::new(
-                    address.clone(),
-                    directory.clone(),
-                    ohttp_keys.clone(),
-                    None,
-                    ReceiverNoopPersister,
-                )?;
+                let mut noop_receiver_persister = ReceiverNoopPersister::default();
+                let session =
+                    NewReceiver::new(address.clone(), directory.clone(), ohttp_keys.clone(), None)?;
+                let storage_token = session.persist(&mut noop_receiver_persister)?;
+                let mut session = storage_token.load(noop_receiver_persister)?;
                 println!("session: {:#?}", &session);
                 // Poll receive request
                 let ohttp_relay = services.ohttp_relay_url();
@@ -335,8 +334,11 @@ mod integration {
                     .check_pj_supported()
                     .map_err(|e| e.to_string())?;
                 let psbt = build_sweep_psbt(&sender, &pj_uri)?;
-                let req_ctx = SenderBuilder::new(psbt.clone(), pj_uri.clone(), SenderNoopPersister)
+                let mut noop_sender_persister = SenderNoopPersister::default();
+                let new_sender = SenderBuilder::new(psbt.clone(), pj_uri.clone())
                     .build_recommended(FeeRate::BROADCAST_MIN)?;
+                let persistence_token = new_sender.persist(&mut noop_sender_persister)?;
+                let req_ctx = persistence_token.load(noop_sender_persister)?;
                 let (Request { url, body, content_type, .. }, send_ctx) =
                     req_ctx.extract_v2(ohttp_relay.to_owned())?;
                 let response = agent
@@ -430,8 +432,11 @@ mod integration {
                 .check_pj_supported()
                 .map_err(|e| e.to_string())?;
             let psbt = build_original_psbt(&sender, &pj_uri)?;
-            let req_ctx = SenderBuilder::new(psbt.clone(), pj_uri.clone(), SenderNoopPersister)
+            let mut noop_sender_persister = SenderNoopPersister::default();
+            let new_sender = SenderBuilder::new(psbt.clone(), pj_uri.clone())
                 .build_recommended(FeeRate::BROADCAST_MIN)?;
+            let persistence_token = new_sender.persist(&mut noop_sender_persister)?;
+            let req_ctx = persistence_token.load(noop_sender_persister)?;
             let (req, ctx) = req_ctx.extract_v1();
             let headers = HeaderMock::new(&req.body, req.content_type);
 
@@ -479,13 +484,11 @@ mod integration {
                 let directory = services.directory_url();
                 let ohttp_keys = services.fetch_ohttp_keys().await?;
                 let address = receiver.get_new_address(None, None)?.assume_checked();
-                let mut session = Receiver::new(
-                    address,
-                    directory.clone(),
-                    ohttp_keys.clone(),
-                    None,
-                    ReceiverNoopPersister,
-                )?;
+                let mut noop_receiver_persister = ReceiverNoopPersister::default();
+                let session =
+                    NewReceiver::new(address, directory.clone(), ohttp_keys.clone(), None)?;
+                let storage_token = session.persist(&mut noop_receiver_persister)?;
+                let mut session = storage_token.load(noop_receiver_persister)?;
 
                 // **********************
                 // Inside the V1 Sender:
@@ -496,15 +499,17 @@ mod integration {
                     .check_pj_supported()
                     .map_err(|e| e.to_string())?;
                 let psbt = build_original_psbt(&sender, &pj_uri)?;
-                let (Request { url, body, content_type, .. }, send_ctx) =
-                    SenderBuilder::new(psbt, pj_uri, SenderNoopPersister)
-                        .build_with_additional_fee(
-                            Amount::from_sat(10000),
-                            None,
-                            FeeRate::ZERO,
-                            false,
-                        )?
-                        .extract_v1();
+                let mut noop_sender_persister = SenderNoopPersister::default();
+                let new_sender = SenderBuilder::new(psbt.clone(), pj_uri.clone())
+                    .build_with_additional_fee(
+                        Amount::from_sat(10000),
+                        None,
+                        FeeRate::ZERO,
+                        false,
+                    )?;
+                let persistence_token = new_sender.persist(&mut noop_sender_persister)?;
+                let req_ctx = persistence_token.load(noop_sender_persister)?;
+                let (Request { url, body, content_type, .. }, send_ctx) = req_ctx.extract_v1();
                 log::info!("send fallback v1 to offline receiver fail");
                 let res = agent
                     .post(url.clone())
@@ -708,7 +713,7 @@ mod integration {
     #[cfg(feature = "_multiparty")]
     mod multiparty {
         use bitcoin::ScriptBuf;
-        use payjoin::receive::v2::{NoopPersister as ReceiverNoopPersister, Receiver};
+        use payjoin::receive::v2::{NewReceiver, NoopPersister as ReceiverNoopPersister, Receiver};
         use payjoin::send::multiparty::{
             GetContext as MultiPartyGetContext, SenderBuilder as MultiPartySenderBuilder,
         };
@@ -756,13 +761,15 @@ mod integration {
                 // Senders will generate a sweep psbt and send PSBT to receiver subdir
                 for sender in senders.iter() {
                     let address = receiver.get_new_address(None, None)?.assume_checked();
-                    let receiver_session = Receiver::new(
+                    let mut noop_receiver_persister = ReceiverNoopPersister::default();
+                    let receiver_session = NewReceiver::new(
                         address.clone(),
                         directory.clone(),
                         ohttp_keys.clone(),
                         None,
-                        ReceiverNoopPersister,
                     )?;
+                    let storage_token = receiver_session.persist(&mut noop_receiver_persister)?;
+                    let receiver_session = storage_token.load(noop_receiver_persister)?;
                     let pj_uri = receiver_session.pj_uri();
                     let psbt = build_sweep_psbt(sender, &pj_uri)?;
                     let sender_ctx = MultiPartySenderBuilder::new(psbt.clone(), pj_uri.clone())
