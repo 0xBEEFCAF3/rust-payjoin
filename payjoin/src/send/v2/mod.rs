@@ -48,10 +48,10 @@ pub struct NewSender {
 impl NewSender {
     pub fn new(v1: v1::Sender, reply_key: HpkeSecretKey) -> Self { Self { v1, reply_key } }
 
-    pub fn persist<P: Persister>(&self, persister: &mut P) -> Result<P::Token, ErrorBox> {
-        let url = self.v1.endpoint.clone();
+    pub fn persist<P: Persister>(&self, persister: &P) -> Result<P::Token, ErrorBox> {
+        let short_id = ShortId::from_public_key(&self.v1.endpoint.receiver_pubkey().unwrap());
         let sender = Sender { v1: self.v1.clone(), reply_key: self.reply_key.clone() };
-        let token = persister.save(url, sender).map_err(ErrorBox::new)?;
+        let token = persister.save(short_id, sender).map_err(ErrorBox::new)?;
         Ok(token)
     }
 }

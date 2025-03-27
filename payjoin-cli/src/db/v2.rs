@@ -1,9 +1,8 @@
 use std::sync::Arc;
 
 use bitcoincore_rpc::jsonrpc::serde_json;
-use payjoin::bitcoin::hex::DisplayHex;
 use payjoin::directory::ShortId;
-use payjoin::persist::{Persister, Token};
+use payjoin::persist::Persister;
 use payjoin::receive::v2::Receiver;
 use payjoin::send::v2::Sender;
 use serde::de::DeserializeOwned;
@@ -13,79 +12,60 @@ use url::Url;
 
 use super::*;
 
-impl Token<SenderPersister> for Url {
-    fn load<T: DeserializeOwned>(
-        &self,
-        persister: &SenderPersister,
-    ) -> std::result::Result<T, Error> {
-        let send_tree = persister.0 .0.open_tree("send_sessions")?;
-        let value = send_tree.get(self.to_string())?.ok_or(Error::NotFound(self.to_string()))?;
-        serde_json::from_slice(&value).map_err(Error::Deserialize)
-    }
-}
-
 #[derive(Clone)]
 pub(crate) struct SenderPersister(pub Arc<Database>);
 impl Persister for SenderPersister {
     type Error = crate::db::error::Error;
-    type Token = Url;
-    type Key = Url;
-    fn save<V: Serialize, K: Serialize>(
-        &mut self,
+    type Token = ShortId;
+    fn save<V: Serialize, K: Into<Vec<u8>>>(
+        &self,
         key: K,
         value: V,
     ) -> std::result::Result<Self::Token, Self::Error> {
         let send_tree = self.0 .0.open_tree("send_sessions")?;
         let value = serde_json::to_string(&value).map_err(Error::Serialize)?;
-        let key_str = serde_json::to_string(&key).map_err(Error::Serialize)?;
-        send_tree.insert(key_str.as_str(), IVec::from(value.as_str()))?;
+        let key_bytes: Vec<u8> = key.into();
+        send_tree.insert(key_bytes.as_slice(), IVec::from(value.as_str()))?;
         send_tree.flush()?;
-        Ok(serde_json::from_str(&key_str).map_err(Error::Deserialize)?)
+
+        Ok(ShortId::from(key_bytes))
     }
 
     fn load<T: DeserializeOwned>(
         &self,
         token: &Self::Token,
     ) -> std::result::Result<T, Self::Error> {
-        token.load(self)
+        let send_tree = self.0 .0.open_tree("send_sessions")?;
+        let value = send_tree.get(token.as_bytes())?.ok_or(Error::NotFound(token.to_string()))?;
+        serde_json::from_slice(&value).map_err(Error::Deserialize)
     }
 }
 
 #[derive(Clone)]
 pub(crate) struct RecieverPersister(pub Arc<Database>);
 impl Persister for RecieverPersister {
-    type Key = ShortId;
     type Error = crate::db::error::Error;
     type Token = ShortId;
-    fn save<V: Serialize, K: Serialize>(
-        &mut self,
+    fn save<V: Serialize, K: Into<Vec<u8>>>(
+        &self,
         key: K,
         value: V,
     ) -> std::result::Result<Self::Token, Self::Error> {
-        let recv_tree = self.0 .0.open_tree("recv_sessions")?;
+        let send_tree = self.0 .0.open_tree("send_sessions")?;
         let value = serde_json::to_string(&value).map_err(Error::Serialize)?;
-        let key_str = serde_json::to_string(&key).map_err(Error::Serialize)?;
-        recv_tree.insert(key_str.as_str(), IVec::from(value.as_str()))?;
-        recv_tree.flush()?;
-        Ok(serde_json::from_str(&key_str).map_err(Error::Deserialize)?)
+        let key_bytes: Vec<u8> = key.into();
+        send_tree.insert(key_bytes.as_slice(), IVec::from(value.as_str()))?;
+        send_tree.flush()?;
+
+        Ok(ShortId::from(key_bytes))
     }
+
     fn load<T: DeserializeOwned>(
         &self,
         token: &Self::Token,
     ) -> std::result::Result<T, Self::Error> {
-        token.load(self)
-    }
-}
-
-impl Token<RecieverPersister> for ShortId {
-    fn load<T: DeserializeOwned>(
-        &self,
-        persister: &RecieverPersister,
-    ) -> std::result::Result<T, Error> {
-        let recv_tree = persister.0 .0.open_tree("recv_sessions")?;
-        let value = recv_tree.get(self.as_slice())?.ok_or(Error::NotFound(
-            self.as_bytes().to_hex_string(payjoin::bitcoin::hex::Case::Lower),
-        ))?;
+        let send_tree = self.0 .0.open_tree("send_sessions")?;
+        let value = send_tree.get(token.as_bytes())?.ok_or(Error::NotFound(token.to_string()))?;
         serde_json::from_slice(&value).map_err(Error::Deserialize)
     }
 }

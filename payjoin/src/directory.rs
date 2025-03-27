@@ -1,5 +1,9 @@
 //! Types relevant to the Payjoin Directory as defined in BIP 77.
 
+use bitcoin::hashes::{sha256, Hash};
+
+use crate::HpkePublicKey;
+
 pub const ENCAPSULATED_MESSAGE_BYTES: usize = 8192;
 
 /// A 64-bit identifier used to identify Payjoin Directory entries.
@@ -25,6 +29,9 @@ pub struct ShortId(pub [u8; 8]);
 impl ShortId {
     pub fn as_bytes(&self) -> &[u8] { &self.0 }
     pub fn as_slice(&self) -> &[u8] { &self.0 }
+    pub fn from_public_key(pk: &HpkePublicKey) -> Self {
+        sha256::Hash::hash(&pk.to_compressed_bytes()).into()
+    }
 }
 
 impl std::fmt::Display for ShortId {
@@ -37,6 +44,14 @@ impl std::fmt::Display for ShortId {
                 .expect("human readable part must be ID1"),
         )
     }
+}
+
+impl From<Vec<u8>> for ShortId {
+    fn from(value: Vec<u8>) -> Self { ShortId::try_from(value.as_slice()).unwrap() }
+}
+
+impl Into<Vec<u8>> for ShortId {
+    fn into(self) -> Vec<u8> { self.as_bytes().to_vec() }
 }
 
 #[derive(Debug)]

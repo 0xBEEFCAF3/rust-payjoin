@@ -115,7 +115,7 @@ impl NewReceiver {
         Ok(receiver)
     }
 
-    pub fn persist<P: Persister>(&self, persister: &mut P) -> Result<P::Token, Error> {
+    pub fn persist<P: Persister>(&self, persister: &P) -> Result<P::Token, Error> {
         let receiver = Receiver { context: self.context.clone() };
         let token = persister
             .save(self.context.id(), receiver)

@@ -53,12 +53,12 @@ impl AppTrait for App {
             Some(send_session) => send_session,
             None => {
                 let psbt = self.create_original_psbt(&uri, fee_rate)?;
-                let mut persister = SenderPersister(self.db.clone());
+                let persister = SenderPersister(self.db.clone());
                 let new_sender = SenderBuilder::new(psbt, uri.clone())
                     .build_recommended(fee_rate)
                     .with_context(|| "Failed to build payjoin request")?;
-                let storage_token = new_sender.persist(&mut persister)?;
-                Sender::load(&storage_token, &mut persister)?
+                let storage_token = new_sender.persist(&persister)?;
+                Sender::load(&storage_token, &persister)?
             }
         };
         self.spawn_payjoin_sender(req_ctx).await
@@ -67,14 +67,14 @@ impl AppTrait for App {
     async fn receive_payjoin(&self, amount: Amount) -> Result<()> {
         let address = self.wallet().get_new_address()?;
         let ohttp_keys = unwrap_ohttp_keys_or_else_fetch(&self.config).await?;
-        let mut persister = RecieverPersister(self.db.clone());
+        let persister = RecieverPersister(self.db.clone());
         let new_receiver = NewReceiver::new(
             address,
             self.config.v2()?.pj_directory.clone(),
             ohttp_keys.clone(),
             None,
         )?;
-        let storage_token = new_receiver.persist(&mut persister)?;
+        let storage_token = new_receiver.persist(&persister)?;
         let session = Receiver::load(&storage_token, &persister)?;
         self.spawn_payjoin_receiver(session, Some(amount)).await
     }

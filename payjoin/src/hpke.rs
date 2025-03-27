@@ -134,6 +134,10 @@ impl HpkePublicKey {
     }
 }
 
+impl From<Vec<u8>> for HpkePublicKey {
+    fn from(value: Vec<u8>) -> Self { Self::from_compressed_bytes(&value).unwrap() }
+}
+
 impl Deref for HpkePublicKey {
     type Target = PublicKey;
 
