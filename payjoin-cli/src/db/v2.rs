@@ -5,8 +5,6 @@ use payjoin::directory::ShortId;
 use payjoin::persist::Persister;
 use payjoin::receive::v2::Receiver;
 use payjoin::send::v2::Sender;
-use serde::de::DeserializeOwned;
-use serde::Serialize;
 use sled::{IVec, Tree};
 use url::Url;
 
@@ -14,13 +12,13 @@ use super::*;
 
 #[derive(Clone)]
 pub(crate) struct SenderPersister(pub Arc<Database>);
-impl Persister for SenderPersister {
+impl Persister<Sender> for SenderPersister {
     type Error = crate::db::error::Error;
     type Token = ShortId;
-    fn save<V: Serialize, K: Into<Vec<u8>>>(
+    fn save<K: Into<Vec<u8>>>(
         &self,
         key: K,
-        value: V,
+        value: Sender,
     ) -> std::result::Result<Self::Token, Self::Error> {
         let send_tree = self.0 .0.open_tree("send_sessions")?;
         let value = serde_json::to_string(&value).map_err(Error::Serialize)?;
@@ -31,42 +29,45 @@ impl Persister for SenderPersister {
         Ok(ShortId::from(key_bytes))
     }
 
-    fn load<T: DeserializeOwned>(
+    fn load(
         &self,
         token: &Self::Token,
-    ) -> std::result::Result<T, Self::Error> {
+    ) -> std::result::Result<Sender, Self::Error> {
         let send_tree = self.0 .0.open_tree("send_sessions")?;
         let value = send_tree.get(token.as_bytes())?.ok_or(Error::NotFound(token.to_string()))?;
-        serde_json::from_slice(&value).map_err(Error::Deserialize)
+        let x = String::from_utf8(value.to_vec()).unwrap();
+        println!(">>>>> x: {}", x);
+        serde_json::from_str(&x).map_err(Error::Deserialize)
     }
 }
 
 #[derive(Clone)]
 pub(crate) struct RecieverPersister(pub Arc<Database>);
-impl Persister for RecieverPersister {
+impl Persister<Receiver> for RecieverPersister {
     type Error = crate::db::error::Error;
     type Token = ShortId;
-    fn save<V: Serialize, K: Into<Vec<u8>>>(
+    fn save<K: Into<Vec<u8>>>(
         &self,
         key: K,
-        value: V,
+        value: Receiver,
     ) -> std::result::Result<Self::Token, Self::Error> {
-        let send_tree = self.0 .0.open_tree("send_sessions")?;
+        let recv_tree = self.0 .0.open_tree("recv_sessions")?;
         let value = serde_json::to_string(&value).map_err(Error::Serialize)?;
         let key_bytes: Vec<u8> = key.into();
-        send_tree.insert(key_bytes.as_slice(), IVec::from(value.as_str()))?;
-        send_tree.flush()?;
+        recv_tree.insert(key_bytes.as_slice(), IVec::from(value.as_str()))?;
+        recv_tree.flush()?;
 
         Ok(ShortId::from(key_bytes))
     }
 
-    fn load<T: DeserializeOwned>(
+    fn load(
         &self,
         token: &Self::Token,
-    ) -> std::result::Result<T, Self::Error> {
-        let send_tree = self.0 .0.open_tree("send_sessions")?;
-        let value = send_tree.get(token.as_bytes())?.ok_or(Error::NotFound(token.to_string()))?;
-        serde_json::from_slice(&value).map_err(Error::Deserialize)
+    ) -> std::result::Result<Receiver, Self::Error> {
+        let recv_tree = self.0 .0.open_tree("recv_sessions")?;
+        let value = recv_tree.get(token.as_bytes())?.ok_or(Error::NotFound(token.to_string()))?;
+        let x = String::from_utf8(value.to_vec()).unwrap();
+        serde_json::from_str(&x).map_err(Error::Deserialize)
     }
 }
 
@@ -75,8 +76,9 @@ impl Database {
         let recv_tree = self.0.open_tree("recv_sessions")?;
         let mut sessions = Vec::new();
         for item in recv_tree.iter() {
-            let (_, value) = item?;
-            let session: Receiver = serde_json::from_slice(&value).map_err(Error::Deserialize)?;
+            let (key, value) = item?;
+            let x = String::from_utf8(value.to_vec()).unwrap();
+            let session: Receiver = serde_json::from_str(&x).map_err(Error::Deserialize)?;
             sessions.push(session);
         }
         Ok(sessions)
@@ -94,7 +96,9 @@ impl Database {
         let mut sessions = Vec::new();
         for item in send_tree.iter() {
             let (_, value) = item?;
-            let session: Sender = serde_json::from_slice(&value).map_err(Error::Deserialize)?;
+            let x = String::from_utf8(value.to_vec()).unwrap();
+            println!(">>>>> y: {}", x);
+            let session: Sender = serde_json::from_str(&x).map_err(Error::Deserialize)?;
             sessions.push(session);
         }
         Ok(sessions)

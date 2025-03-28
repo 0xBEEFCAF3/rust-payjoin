@@ -32,7 +32,7 @@ use super::error::BuildSenderError;
 use super::*;
 use crate::hpke::{decrypt_message_b, encrypt_message_a, HpkeSecretKey};
 use crate::ohttp::{ohttp_decapsulate, ohttp_encapsulate};
-use crate::persist::Persister;
+use crate::persist::{PersistableValue, Persister};
 use crate::send::v1;
 use crate::uri::{ShortId, UrlExt};
 use crate::{HpkeKeyPair, HpkePublicKey, IntoUrl, OhttpKeys, PjUri, Request};
@@ -48,13 +48,15 @@ pub struct NewSender {
 impl NewSender {
     pub fn new(v1: v1::Sender, reply_key: HpkeSecretKey) -> Self { Self { v1, reply_key } }
 
-    pub fn persist<P: Persister>(&self, persister: &P) -> Result<P::Token, ErrorBox> {
+    pub fn persist<P: Persister<Sender>>(&self, persister: &P) -> Result<P::Token, ErrorBox> {
         let short_id = ShortId::from_public_key(&self.v1.endpoint.receiver_pubkey().unwrap());
         let sender = Sender { v1: self.v1.clone(), reply_key: self.reply_key.clone() };
         let token = persister.save(short_id, sender).map_err(ErrorBox::new)?;
         Ok(token)
     }
 }
+
+impl PersistableValue for Sender {}
 
 #[derive(Clone)]
 pub struct SenderBuilder<'a>(pub(crate) v1::SenderBuilder<'a>);
@@ -147,7 +149,7 @@ pub struct Sender {
 }
 
 impl Sender {
-    pub fn load<P: Persister>(token: &P::Token, persister: &P) -> Result<Self, P::Error> {
+    pub fn load<P: Persister<Sender>>(token: &P::Token, persister: &P) -> Result<Self, P::Error> {
         persister.load(token).map_err(|e| todo!())
     }
     /// Extract serialized V1 Request and Context from a Payjoin Proposal

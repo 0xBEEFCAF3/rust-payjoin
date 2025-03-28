@@ -20,7 +20,7 @@ use super::{
 use crate::hpke::{decrypt_message_a, encrypt_message_b, HpkeKeyPair, HpkePublicKey};
 use crate::ohttp::{ohttp_decapsulate, ohttp_encapsulate, OhttpEncapsulationError, OhttpKeys};
 use crate::output_substitution::OutputSubstitution;
-use crate::persist::Persister;
+use crate::persist::{PersistableValue, Persister};
 use crate::receive::{parse_payload, InputPair};
 use crate::uri::ShortId;
 use crate::{IntoUrl, Request};
@@ -115,7 +115,7 @@ impl NewReceiver {
         Ok(receiver)
     }
 
-    pub fn persist<P: Persister>(&self, persister: &P) -> Result<P::Token, Error> {
+    pub fn persist<P: Persister<Receiver>>(&self, persister: &P) -> Result<P::Token, Error> {
         let receiver = Receiver { context: self.context.clone() };
         let token = persister
             .save(self.context.id(), receiver)
@@ -124,13 +124,15 @@ impl NewReceiver {
     }
 }
 
+impl PersistableValue for Receiver {}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Receiver {
     context: SessionContext,
 }
 
 impl Receiver {
-    pub fn load<P: Persister>(token: &P::Token, persister: &P) -> Result<Self, Error> {
+    pub fn load<P: Persister<Receiver>>(token: &P::Token, persister: &P) -> Result<Self, Error> {
         persister.load(token).map_err(|e| todo!())
     }
     /// Extract an OHTTP Encapsulated HTTP GET request for the Original PSBT
