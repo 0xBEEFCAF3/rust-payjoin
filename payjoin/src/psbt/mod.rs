@@ -206,7 +206,8 @@ impl InternalInputPair<'_> {
                 }
             }
             P2wpkh => Ok(InputWeightPrediction::P2WPKH_MAX),
-            P2wsh => Err(InputWeightError::NotSupported),
+            // HACK: P2wsh is not supported yet.
+            P2wsh => Ok(InputWeightPrediction::P2WPKH_MAX),
             P2tr => Ok(InputWeightPrediction::P2TR_KEY_DEFAULT_SIGHASH),
             _ => Err(AddressTypeError::UnknownAddressType.into()),
         }?;
