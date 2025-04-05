@@ -282,6 +282,7 @@ mod test {
             &[ohttp::SymmetricSuite::new(Kdf::HkdfSha256, Aead::ChaCha20Poly1305)];
         let keys = OhttpKeys(ohttp::KeyConfig::new(KEY_ID, KEM, Vec::from(SYMMETRIC)).unwrap());
         let serialized = &keys.to_string();
+        println!("keys: serialiozed: {:?}", serialized);
         let deserialized = OhttpKeys::from_str(serialized).unwrap();
         assert_eq!(keys.encode().unwrap(), deserialized.encode().unwrap());
     }

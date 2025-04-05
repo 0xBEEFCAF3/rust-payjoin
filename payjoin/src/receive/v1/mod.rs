@@ -685,25 +685,25 @@ impl ProvisionalProposal {
     fn prepare_psbt(mut self, processed_psbt: Psbt) -> PayjoinProposal {
         self.payjoin_psbt = processed_psbt;
         log::trace!("Preparing PSBT {:#?}", self.payjoin_psbt);
-        for output in self.payjoin_psbt.outputs_mut() {
-            output.bip32_derivation.clear();
-            output.tap_key_origins.clear();
-            output.tap_internal_key = None;
-        }
-        for input in self.payjoin_psbt.inputs_mut() {
-            input.bip32_derivation.clear();
-            input.tap_key_origins.clear();
-            input.tap_internal_key = None;
-            input.partial_sigs.clear();
-        }
-        for i in self.sender_input_indexes() {
-            log::trace!("Clearing sender input {}", i);
-            self.payjoin_psbt.inputs[i].non_witness_utxo = None;
-            self.payjoin_psbt.inputs[i].witness_utxo = None;
-            self.payjoin_psbt.inputs[i].final_script_sig = None;
-            self.payjoin_psbt.inputs[i].final_script_witness = None;
-            self.payjoin_psbt.inputs[i].tap_key_sig = None;
-        }
+        // for output in self.payjoin_psbt.outputs_mut() {
+        //     output.bip32_derivation.clear();
+        //     output.tap_key_origins.clear();
+        //     output.tap_internal_key = None;
+        // }
+        // for input in self.payjoin_psbt.inputs_mut() {
+        //     input.bip32_derivation.clear();
+        //     input.tap_key_origins.clear();
+        //     input.tap_internal_key = None;
+        //     input.partial_sigs.clear();
+        // }
+        // for i in self.sender_input_indexes() {
+        //     log::trace!("Clearing sender input {}", i);
+        //     self.payjoin_psbt.inputs[i].non_witness_utxo = None;
+        //     self.payjoin_psbt.inputs[i].witness_utxo = None;
+        //     self.payjoin_psbt.inputs[i].final_script_sig = None;
+        //     self.payjoin_psbt.inputs[i].final_script_witness = None;
+        //     self.payjoin_psbt.inputs[i].tap_key_sig = None;
+        // }
 
         PayjoinProposal { payjoin_psbt: self.payjoin_psbt }
     }
