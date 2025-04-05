@@ -309,26 +309,27 @@ fn check_single_payee(
 }
 
 fn clear_unneeded_fields(psbt: &mut Psbt) {
-    psbt.xpub_mut().clear();
-    psbt.proprietary_mut().clear();
-    psbt.unknown_mut().clear();
-    for input in psbt.inputs_mut() {
-        input.bip32_derivation.clear();
-        input.tap_internal_key = None;
-        input.tap_key_origins.clear();
-        input.tap_key_sig = None;
-        input.tap_merkle_root = None;
-        input.tap_script_sigs.clear();
-        input.proprietary.clear();
-        input.unknown.clear();
-    }
-    for output in psbt.outputs_mut() {
-        output.bip32_derivation.clear();
-        output.tap_internal_key = None;
-        output.tap_key_origins.clear();
-        output.proprietary.clear();
-        output.unknown.clear();
-    }
+    // For hackathon: we are not clearing the fields, as its too hard to reconstruct the psbt. Re-enable this after hackathon for real integration.
+    // psbt.xpub_mut().clear();
+    // psbt.proprietary_mut().clear();
+    // psbt.unknown_mut().clear();
+    // for input in psbt.inputs_mut() {
+    //     input.bip32_derivation.clear();
+    //     input.tap_internal_key = None;
+    //     input.tap_key_origins.clear();
+    //     input.tap_key_sig = None;
+    //     input.tap_merkle_root = None;
+    //     input.tap_script_sigs.clear();
+    //     input.proprietary.clear();
+    //     input.unknown.clear();
+    // }
+    // for output in psbt.outputs_mut() {
+    //     output.bip32_derivation.clear();
+    //     output.tap_internal_key = None;
+    //     output.tap_key_origins.clear();
+    //     output.proprietary.clear();
+    //     output.unknown.clear();
+    // }
 }
 
 /// Ensure that an additional fee output is sufficient to pay for the specified additional fee
