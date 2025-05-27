@@ -209,10 +209,10 @@ pub struct PayjoinProposal {
 }
 
 impl PayjoinProposal {
-    pub fn sender_iter(&self) -> impl Iterator<Item = v2::PayjoinProposal> {
+    pub fn sender_iter(&self) -> impl Iterator<Item = v2::Receiver<v2::PayjoinProposal>> {
         self.contexts
             .iter()
-            .map(|ctx| v2::PayjoinProposal::new(self.v1.clone(), ctx.clone()))
+            .map(|ctx| v2::Receiver::new(v2::PayjoinProposal::new(self.v1.clone(), ctx.clone())))
             .collect::<Vec<_>>()
             .into_iter()
     }
