@@ -295,7 +295,7 @@ pub(crate) fn serialize_v2_body(
 /// Data required to validate the POST response.
 ///
 /// This type is used to process a BIP77 POST response.
-/// Call [`Self::process_response`] on it to continue the BIP77 flow.
+/// Call [`Sender<V2PostContext>::process_response`] on it to continue the BIP77 flow.
 pub struct V2PostContext {
     /// The endpoint in the Payjoin URI
     pub(crate) endpoint: Url,
@@ -343,7 +343,7 @@ impl Sender<V2PostContext> {
 /// Data required to validate the GET response.
 ///
 /// This type is used to make a BIP77 GET request and process the response.
-/// Call [`Self::process_response`] on it to continue the BIP77 flow.
+/// Call [`Sender<V2GetContext>::process_response`] on it to continue the BIP77 flow.
 #[derive(Debug, Clone)]
 pub struct V2GetContext {
     /// The endpoint in the Payjoin URI
