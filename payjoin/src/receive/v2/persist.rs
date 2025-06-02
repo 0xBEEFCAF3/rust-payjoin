@@ -48,3 +48,41 @@ pub enum SessionEvent {
     /// b/c its a terminal state and there is nothing to replay. So serialization will be lossy and that is fine.
     SessionInvalid(String),
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::receive::v1::test::{
+        maybe_inputs_owned_from_test_vector, maybe_inputs_seen_from_test_vector,
+        outputs_unknown_from_test_vector, payjoin_proposal_from_test_vector,
+        provisional_proposal_from_test_vector, unchecked_proposal_from_test_vector,
+        wants_inputs_from_test_vector, wants_outputs_from_test_vector,
+    };
+    use crate::receive::v2::test::SHARED_CONTEXT;
+
+    #[test]
+    fn test_session_event_serialization_roundtrip() {
+        let unchecked_proposal = unchecked_proposal_from_test_vector();
+        let test_cases = vec![
+            SessionEvent::Created(SHARED_CONTEXT.clone()),
+            SessionEvent::UncheckedProposal(unchecked_proposal.clone()),
+            SessionEvent::MaybeInputsOwned(maybe_inputs_owned_from_test_vector()),
+            SessionEvent::MaybeInputsSeen(maybe_inputs_seen_from_test_vector()),
+            SessionEvent::OutputsUnknown(outputs_unknown_from_test_vector()),
+            SessionEvent::WantsOutputs(wants_outputs_from_test_vector(unchecked_proposal.clone())),
+            SessionEvent::WantsInputs(wants_inputs_from_test_vector()),
+            SessionEvent::ProvisionalProposal(provisional_proposal_from_test_vector(
+                unchecked_proposal.clone(),
+            )),
+            SessionEvent::PayjoinProposal(payjoin_proposal_from_test_vector(
+                unchecked_proposal.clone(),
+            )),
+        ];
+        for event in test_cases {
+            let serialized = serde_json::to_string(&event).expect("Serialization should not fail");
+            let deserialized: SessionEvent =
+                serde_json::from_str(&serialized).expect("Deserialization should not fail");
+            assert_eq!(event, deserialized);
+        }
+    }
+}
