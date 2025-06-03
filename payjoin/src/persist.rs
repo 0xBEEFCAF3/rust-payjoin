@@ -69,25 +69,21 @@ impl<Event, NextState, CurrentState, Err>
     MaybeFatalTransitionWithNoResults<Event, NextState, CurrentState, Err>
 {
     #[inline]
-    #[allow(dead_code)]
     pub(crate) fn fatal(event: Event, error: Err) -> Self {
         MaybeFatalTransitionWithNoResults(Err(Rejection::fatal(event, error)))
     }
 
     #[inline]
-    #[allow(dead_code)]
     pub(crate) fn transient(error: Err) -> Self {
         MaybeFatalTransitionWithNoResults(Err(Rejection::transient(error)))
     }
 
     #[inline]
-    #[allow(dead_code)]
     pub(crate) fn no_results(current_state: CurrentState) -> Self {
         MaybeFatalTransitionWithNoResults(Ok(AcceptOptionalTransition::NoResults(current_state)))
     }
 
     #[inline]
-    #[allow(dead_code)]
     pub(crate) fn success(event: Event, next_state: NextState) -> Self {
         MaybeFatalTransitionWithNoResults(Ok(AcceptOptionalTransition::Success(AcceptNextState(
             event, next_state,
@@ -116,19 +112,16 @@ pub struct MaybeFatalTransition<Event, NextState, Err>(
 
 impl<Event, NextState, Err> MaybeFatalTransition<Event, NextState, Err> {
     #[inline]
-    #[allow(dead_code)]
     pub(crate) fn fatal(event: Event, error: Err) -> Self {
         MaybeFatalTransition(Err(Rejection::fatal(event, error)))
     }
 
     #[inline]
-    #[allow(dead_code)]
     pub(crate) fn transient(error: Err) -> Self {
         MaybeFatalTransition(Err(Rejection::transient(error)))
     }
 
     #[inline]
-    #[allow(dead_code)]
     pub(crate) fn success(event: Event, next_state: NextState) -> Self {
         MaybeFatalTransition(Ok(AcceptNextState(event, next_state)))
     }
@@ -153,13 +146,11 @@ pub struct MaybeTransientTransition<Event, NextState, Err>(
 
 impl<Event, NextState, Err> MaybeTransientTransition<Event, NextState, Err> {
     #[inline]
-    #[allow(dead_code)]
     pub(crate) fn success(event: Event, next_state: NextState) -> Self {
         MaybeTransientTransition(Ok(AcceptNextState(event, next_state)))
     }
 
     #[inline]
-    #[allow(dead_code)]
     pub(crate) fn transient(error: Err) -> Self {
         MaybeTransientTransition(Err(RejectTransient(error)))
     }
@@ -188,13 +179,11 @@ where
     Err: std::error::Error,
 {
     #[inline]
-    #[allow(dead_code)]
     pub(crate) fn success(success_value: SuccessValue) -> Self {
         MaybeSuccessTransition(Ok(AcceptCompleted(success_value)))
     }
 
     #[inline]
-    #[allow(dead_code)]
     pub(crate) fn transient(error: Err) -> Self {
         MaybeSuccessTransition(Err(RejectTransient(error)))
     }
@@ -215,7 +204,6 @@ pub struct NextStateTransition<Event, NextState>(AcceptNextState<Event, NextStat
 
 impl<Event, NextState> NextStateTransition<Event, NextState> {
     #[inline]
-    #[allow(dead_code)]
     pub(crate) fn success(event: Event, next_state: NextState) -> Self {
         NextStateTransition(AcceptNextState(event, next_state))
     }
@@ -237,13 +225,11 @@ pub struct MaybeBadInitInputsTransition<Event, NextState, Err>(
 
 impl<Event, NextState, Err> MaybeBadInitInputsTransition<Event, NextState, Err> {
     #[inline]
-    #[allow(dead_code)]
     pub(crate) fn success(event: Event, next_state: NextState) -> Self {
         MaybeBadInitInputsTransition(Ok(AcceptNextState(event, next_state)))
     }
 
     #[inline]
-    #[allow(dead_code)]
     pub(crate) fn bad_init_inputs(error: Err) -> Self {
         MaybeBadInitInputsTransition(Err(RejectBadInitInputs(error)))
     }
@@ -281,10 +267,8 @@ pub enum Rejection<Event, Err> {
 
 impl<Event, Err> Rejection<Event, Err> {
     #[inline]
-    #[allow(dead_code)]
     pub fn fatal(event: Event, error: Err) -> Self { Rejection::Fatal(RejectFatal(event, error)) }
     #[inline]
-    #[allow(dead_code)]
     pub fn transient(error: Err) -> Self { Rejection::Transient(RejectTransient(error)) }
 }
 
@@ -310,7 +294,6 @@ where
     StorageErr: std::error::Error,
     ApiErr: std::error::Error,
 {
-    #[allow(dead_code)]
     pub fn storage_error(self) -> Option<StorageError<StorageErr>> {
         match self.0 {
             InternalPersistedError::Storage(e) => Some(e),
@@ -318,9 +301,24 @@ where
         }
     }
 
-    #[allow(dead_code)]
     pub fn api_error(self) -> Option<ApiErr> {
         match self.0 {
+            InternalPersistedError::Fatal(e)
+            | InternalPersistedError::BadInitInputs(e)
+            | InternalPersistedError::Transient(e) => Some(e),
+            _ => None,
+        }
+    }
+
+    pub fn storage_error_ref(&self) -> Option<&StorageError<StorageErr>> {
+        match &self.0 {
+            InternalPersistedError::Storage(e) => Some(e),
+            _ => None,
+        }
+    }
+
+    pub fn api_error_ref(&self) -> Option<&ApiErr> {
+        match &self.0 {
             InternalPersistedError::Fatal(e)
             | InternalPersistedError::BadInitInputs(e)
             | InternalPersistedError::Transient(e) => Some(e),
@@ -385,7 +383,7 @@ impl<NextState, CurrentState> OptionalTransitionOutcome<NextState, CurrentState>
 
     pub fn is_success(&self) -> bool { matches!(self, OptionalTransitionOutcome::Progress(_)) }
 
-    pub fn success(&self) -> Option<&NextState> {
+    pub fn success(self) -> Option<NextState> {
         match self {
             OptionalTransitionOutcome::Progress(next_state) => Some(next_state),
             OptionalTransitionOutcome::Stasis(_) => None,
@@ -627,7 +625,16 @@ pub mod test_utils {
         fn default() -> Self { Self { inner: Arc::new(RwLock::new(InnerStorage::default())) } }
     }
 
-    #[derive(Clone)]
+    impl<V: PartialEq> PartialEq for InMemoryTestPersister<V> {
+        fn eq(&self, other: &Self) -> bool {
+            self.inner.read().expect("Lock should not be poisoned").is_closed
+                == other.inner.read().expect("Lock should not be poisoned").is_closed
+                && self.inner.read().expect("Lock should not be poisoned").events
+                    == other.inner.read().expect("Lock should not be poisoned").events
+        }
+    }
+
+    #[derive(Clone, PartialEq)]
     pub(crate) struct InnerStorage<V> {
         pub(crate) events: Vec<V>,
         pub(crate) is_closed: bool,
@@ -1029,7 +1036,7 @@ mod tests {
         let success = OptionalTransitionOutcome::<String, String>::Progress(next_state.clone());
         assert!(!success.is_none());
         assert!(success.is_success());
-        assert_eq!(success.success(), Some(&next_state));
+        assert_eq!(success.success(), Some(next_state));
 
         let no_results = OptionalTransitionOutcome::<String, String>::Stasis(current_state.clone());
         assert!(no_results.is_none());
