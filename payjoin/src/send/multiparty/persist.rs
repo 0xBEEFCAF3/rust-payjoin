@@ -8,7 +8,8 @@ impl NewSender {
         persister: &mut P,
     ) -> Result<P::Token, ImplementationError> {
         let sender = Sender(v2::Sender {
-            state: v2::WithReplyKey { v1: self.0.v1.clone(), reply_key: self.0.reply_key.clone() },
+            v1: self.0.v1.clone(),
+            state: v2::WithReplyKey { reply_key: self.0.reply_key.clone() },
         });
         persister.save(sender).map_err(ImplementationError::from)
     }

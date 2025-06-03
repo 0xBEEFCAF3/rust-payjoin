@@ -76,7 +76,7 @@ impl Sender {
             hpke_ctx: HpkeContext::new(rs, &self.0.reply_key),
             ohttp_ctx,
         };
-        Ok((request, PostContext(v2::Sender { state: v2_post_ctx })))
+        Ok((request, PostContext(v2::Sender { v1: self.0.v1.clone(), state: v2_post_ctx })))
     }
 }
 

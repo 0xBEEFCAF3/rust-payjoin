@@ -129,6 +129,7 @@ pub trait SenderState {}
 #[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Sender<State: SenderState> {
     pub(crate) state: State,
+    pub(crate) v1: v1::Sender,
 }
 
 impl<State: SenderState> core::ops::Deref for Sender<State> {
@@ -155,7 +156,8 @@ impl NewSender {
         persister: &mut P,
     ) -> Result<P::Token, ImplementationError> {
         let sender = Sender {
-            state: WithReplyKey { v1: self.v1.clone(), reply_key: self.reply_key.clone() },
+            v1: self.v1.clone(),
+            state: WithReplyKey { reply_key: self.reply_key.clone() },
         };
         Ok(persister.save(sender)?)
     }
@@ -165,8 +167,6 @@ impl NewSender {
 /// and the resulting [`V2PostContext`].
 #[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct WithReplyKey {
-    /// The v1 Sender.
-    pub(crate) v1: v1::Sender,
     /// The secret key to decrypt the receiver's reply.
     pub(crate) reply_key: HpkeSecretKey,
 }
@@ -221,6 +221,7 @@ impl Sender<WithReplyKey> {
         Ok((
             request,
             Sender {
+                v1: self.v1.clone(),
                 state: V2PostContext {
                     endpoint: self.v1.endpoint.clone(),
                     psbt_ctx: PsbtContext {
@@ -334,6 +335,7 @@ impl Sender<V2PostContext> {
             http::StatusCode::OK => {
                 // return OK with new Typestate
                 Ok(Sender {
+                    v1: self.v1.clone(),
                     state: V2GetContext {
                         endpoint: self.state.endpoint,
                         psbt_ctx: self.state.psbt_ctx,
@@ -457,17 +459,15 @@ mod test {
     fn create_sender_context() -> Result<super::Sender<super::WithReplyKey>, BoxError> {
         let endpoint = Url::parse("http://localhost:1234")?;
         let mut sender = super::Sender {
-            state: super::WithReplyKey {
-                v1: v1::Sender {
-                    psbt: PARSED_ORIGINAL_PSBT.clone(),
-                    endpoint,
-                    output_substitution: OutputSubstitution::Enabled,
-                    fee_contribution: None,
-                    min_fee_rate: FeeRate::ZERO,
-                    payee: ScriptBuf::from(vec![0x00]),
-                },
-                reply_key: HpkeKeyPair::gen_keypair().0,
+            v1: v1::Sender {
+                psbt: PARSED_ORIGINAL_PSBT.clone(),
+                endpoint,
+                output_substitution: OutputSubstitution::Enabled,
+                fee_contribution: None,
+                min_fee_rate: FeeRate::ZERO,
+                payee: ScriptBuf::from(vec![0x00]),
             },
+            state: super::WithReplyKey { reply_key: HpkeKeyPair::gen_keypair().0 },
         };
         sender.v1.endpoint.set_exp(SystemTime::now() + Duration::from_secs(60));
         sender.v1.endpoint.set_receiver_pubkey(HpkeKeyPair::gen_keypair().1);
