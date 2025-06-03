@@ -765,6 +765,10 @@ impl ProvisionalProposal {
         let payjoin_proposal = self.prepare_psbt(psbt);
         Ok(payjoin_proposal)
     }
+
+    #[cfg(feature = "v2")]
+    /// Returns a PSBT that includes the receiver's contributed inputs.
+    pub(crate) fn psbt(&self) -> bitcoin::Psbt { self.payjoin_psbt.clone() }
 }
 
 /// A finalized payjoin proposal, complete with fees and receiver signatures, that the sender
