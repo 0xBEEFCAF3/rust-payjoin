@@ -5,9 +5,9 @@ use serde::{Deserialize, Serialize};
 use super::{Receiver, ReceiverTypeState, SessionContext, UninitializedReceiver};
 use crate::output_substitution::OutputSubstitution;
 use crate::persist::SessionPersister;
-use crate::receive::v2::subdir;
+use crate::receive::v2::{extract_err_req, subdir, SessionError};
 use crate::receive::{v1, JsonReply};
-use crate::{HpkePublicKey, ImplementationError, PjUri};
+use crate::{HpkePublicKey, ImplementationError, IntoUrl, PjUri, Request};
 
 /// Errors that can occur when replaying a receiver event log
 #[derive(Debug)]
@@ -165,6 +165,31 @@ impl SessionHistory {
         self.events.iter().find_map(|event| match event {
             ReceiverSessionEvent::SessionInvalid(err_str, reply) =>
                 Some((err_str.clone(), reply.clone())),
+            _ => None,
+        })
+    }
+
+    /// Extract the error request to be posted on the directory if an error occurred.
+    /// To process the response, use [crate::receive::v2::process_err_res]
+    pub fn extract_err_req(
+        &self,
+        ohttp_relay: impl IntoUrl,
+    ) -> Result<Option<(Request, ohttp::ClientResponse)>, SessionError> {
+        let session_context = match self.session_context() {
+            Some(session_context) => session_context,
+            None => return Ok(None),
+        };
+        let json_reply = match self.terminal_error() {
+            Some((_, Some(json_reply))) => json_reply,
+            _ => return Ok(None),
+        };
+        let (req, ctx) = extract_err_req(&json_reply, ohttp_relay, session_context)?;
+        Ok(Some((req, ctx)))
+    }
+
+    pub fn session_context(&self) -> Option<&SessionContext> {
+        self.events.iter().find_map(|event| match event {
+            ReceiverSessionEvent::Created(session_context) => Some(session_context),
             _ => None,
         })
     }
