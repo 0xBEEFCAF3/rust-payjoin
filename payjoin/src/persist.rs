@@ -611,29 +611,38 @@ impl<E: 'static> SessionPersister for NoopSessionPersister<E> {
     fn close(&self) -> Result<(), Self::InternalStorageError> { Ok(()) }
 }
 
-#[cfg(test)]
-mod tests {
+#[cfg(feature = "_test-utils")]
+pub mod test_utils {
     use std::sync::{Arc, RwLock};
 
     use serde::{Deserialize, Serialize};
 
-    use super::*;
+    use crate::persist::SessionPersister;
 
-    type InMemoryTestState = String;
-    #[derive(Clone, Default)]
-    struct InMemoryTestPersister {
-        inner: Arc<RwLock<InnerStorage>>,
+    #[derive(Debug, Clone, Serialize, Deserialize)]
+    pub struct InMemoryTestEvent(String);
+    #[derive(Clone)]
+    pub struct InMemoryTestPersister<ReceiverSessionEvent> {
+        pub inner: Arc<RwLock<InnerStorage<ReceiverSessionEvent>>>,
     }
 
-    #[derive(Clone, Default)]
-    struct InnerStorage {
-        events: Vec<String>,
-        is_closed: bool,
+    impl<ReceiverSessionEvent> Default for InMemoryTestPersister<ReceiverSessionEvent> {
+        fn default() -> Self { Self { inner: Arc::new(RwLock::new(InnerStorage::default())) } }
+    }
+
+    #[derive(Clone)]
+    pub struct InnerStorage<ReceiverSessionEvent> {
+        pub events: Vec<ReceiverSessionEvent>,
+        pub is_closed: bool,
+    }
+
+    impl<ReceiverSessionEvent> Default for InnerStorage<ReceiverSessionEvent> {
+        fn default() -> Self { Self { events: vec![], is_closed: false } }
     }
 
     #[derive(Debug, Clone, PartialEq)]
     /// Dummy error type for testing
-    struct InMemoryTestError {}
+    pub struct InMemoryTestError {}
 
     impl std::error::Error for InMemoryTestError {}
 
@@ -643,9 +652,45 @@ mod tests {
         }
     }
 
+    impl SessionPersister for InMemoryTestPersister<crate::receive::v2::ReceiverSessionEvent> {
+        type InternalStorageError = std::convert::Infallible;
+        type SessionEvent = crate::receive::v2::ReceiverSessionEvent;
+
+        fn save_event(&self, event: &Self::SessionEvent) -> Result<(), Self::InternalStorageError> {
+            let mut inner = self.inner.write().expect("Lock should not be poisoned");
+            inner.events.push(event.clone());
+            Ok(())
+        }
+
+        fn load(
+            &self,
+        ) -> Result<Box<dyn Iterator<Item = Self::SessionEvent>>, Self::InternalStorageError>
+        {
+            let inner = self.inner.read().expect("Lock should not be poisoned");
+            let events = inner.events.clone();
+            Ok(Box::new(events.into_iter()))
+        }
+
+        fn close(&self) -> Result<(), Self::InternalStorageError> {
+            let mut inner = self.inner.write().expect("Lock should not be poisoned");
+            inner.is_closed = true;
+            Ok(())
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use serde::{Deserialize, Serialize};
+
+    use super::*;
+    use crate::persist::test_utils::{InMemoryTestError, InMemoryTestPersister};
+
+    type InMemoryTestState = String;
+
     #[derive(Debug, Clone, Serialize, Deserialize)]
-    struct InMemoryTestEvent(String);
-    impl SessionPersister for InMemoryTestPersister {
+    pub struct InMemoryTestEvent(String);
+    impl SessionPersister for InMemoryTestPersister<InMemoryTestState> {
         type InternalStorageError = std::convert::Infallible;
         type SessionEvent = InMemoryTestEvent;
 
@@ -674,7 +719,9 @@ mod tests {
     struct TestCase<SuccessState, ErrorState> {
         // Allow type complexity for the test closure
         #[allow(clippy::type_complexity)]
-        test: Box<dyn Fn(&InMemoryTestPersister) -> Result<SuccessState, ErrorState>>,
+        test: Box<
+            dyn Fn(&InMemoryTestPersister<InMemoryTestState>) -> Result<SuccessState, ErrorState>,
+        >,
         expected_result: ExpectedResult<SuccessState, ErrorState>,
     }
 
@@ -690,7 +737,7 @@ mod tests {
     }
 
     fn do_test<SuccessState: std::fmt::Debug + PartialEq, ErrorState: std::error::Error>(
-        persister: &InMemoryTestPersister,
+        persister: &InMemoryTestPersister<InMemoryTestState>,
         test_case: &TestCase<SuccessState, ErrorState>,
     ) {
         let expected_result = &test_case.expected_result;
