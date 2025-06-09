@@ -84,13 +84,6 @@ pub struct SessionHistory {
 }
 
 impl SessionHistory {
-    pub fn session_context(&self) -> Option<&SessionContext> {
-        self.events.iter().find_map(|event| match event {
-            ReceiverSessionEvent::Created(session_context) => Some(session_context),
-            _ => None,
-        })
-    }
-
     pub fn pj_uri<'a>(&self) -> Option<PjUri<'a>> {
         self.events.iter().find_map(|event| match event {
             ReceiverSessionEvent::Created(session_context) => {
@@ -121,6 +114,16 @@ impl SessionHistory {
         self.events.iter().find_map(|event| match event {
             ReceiverSessionEvent::UncheckedProposal((proposal, _)) =>
                 Some(proposal.psbt.unsigned_tx.compute_txid()),
+            _ => None,
+        })
+    }
+
+    pub fn fallback_tx(
+        self,
+    ) -> Option<Result<bitcoin::Transaction, bitcoin::psbt::ExtractTxError>> {
+        self.events.into_iter().find_map(|event| match event {
+            ReceiverSessionEvent::UncheckedProposal((proposal, _)) =>
+                Some(proposal.psbt.extract_tx()),
             _ => None,
         })
     }
@@ -170,6 +173,13 @@ impl SessionHistory {
         };
         let (req, ctx) = extract_err_req(&json_reply, ohttp_relay, session_context)?;
         Ok(Some((req, ctx)))
+    }
+
+    fn session_context(&self) -> Option<&SessionContext> {
+        self.events.iter().find_map(|event| match event {
+            ReceiverSessionEvent::Created(session_context) => Some(session_context),
+            _ => None,
+        })
     }
 }
 
