@@ -11,12 +11,12 @@ use super::{serialize_url, AdditionalFeeContribution, BuildSenderError, Internal
 use crate::hpke::decrypt_message_b;
 use crate::ohttp::ohttp_decapsulate;
 use crate::output_substitution::OutputSubstitution;
+use crate::persist::NoopSessionPersister;
 use crate::send::v2::V2PostContext;
 use crate::uri::UrlExt;
 use crate::{ImplementationError, IntoUrl, PjUri, Request};
 
 mod error;
-mod persist;
 
 #[derive(Clone)]
 pub struct SenderBuilder<'a>(v2::SenderBuilder<'a>);
@@ -24,13 +24,16 @@ pub struct SenderBuilder<'a>(v2::SenderBuilder<'a>);
 impl<'a> SenderBuilder<'a> {
     pub fn new(psbt: Psbt, uri: PjUri<'a>) -> Self { Self(v2::SenderBuilder::new(psbt, uri)) }
 
-    pub fn build_recommended(self, min_fee_rate: FeeRate) -> Result<NewSender, BuildSenderError> {
-        let sender = self.0.build_recommended(min_fee_rate)?;
-        Ok(NewSender(sender))
+    pub fn build_recommended(self, min_fee_rate: FeeRate) -> Result<Sender, BuildSenderError> {
+        let noop_persister = NoopSessionPersister::default();
+        let sender = self
+            .0
+            .build_recommended(min_fee_rate)
+            .save(&noop_persister)
+            .expect("Noop persister should never fail");
+        Ok(Sender(sender))
     }
 }
-
-pub struct NewSender(v2::NewSender);
 
 #[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Sender(v2::Sender<v2::WithReplyKey>);
@@ -76,7 +79,27 @@ impl Sender {
             hpke_ctx: HpkeContext::new(rs, &self.0.reply_key),
             ohttp_ctx,
         };
-        Ok((request, PostContext(v2::Sender { state: v2_post_ctx })))
+        Ok((request, PostContext(v2_post_ctx)))
+    }
+
+    pub fn process_response(
+        self,
+        response: &[u8],
+        post_ctx: PostContext,
+    ) -> Result<GetContext, EncapsulationError> {
+        let noop_persister = NoopSessionPersister::default();
+        let res = self
+            .0
+            .process_response(response, post_ctx.0)
+            .save(&noop_persister)
+            // TODO: error should be handled
+            .expect("Noop does not fail");
+
+        // let next_state = GetContext(res.clone());
+        // let sender = v2::Sender {
+        //     state: next_state,
+        // };
+        Ok(GetContext(res))
     }
 }
 
@@ -100,14 +123,7 @@ fn serialize_v2_body(
 
 /// Post context is used to process the response from the directory and generate
 /// the GET context which can be used to extract a request for the receiver
-pub struct PostContext(v2::Sender<v2::V2PostContext>);
-
-impl PostContext {
-    pub fn process_response(self, response: &[u8]) -> Result<GetContext, EncapsulationError> {
-        let v2_get_ctx = self.0.process_response(response)?;
-        Ok(GetContext(v2_get_ctx))
-    }
-}
+pub struct PostContext(v2::V2PostContext);
 
 /// Get context is used to extract a request for the receiver. In the multiparty context this is a
 /// merged PSBT with other senders.
