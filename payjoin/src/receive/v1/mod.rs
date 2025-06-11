@@ -792,76 +792,12 @@ pub(crate) mod test {
     use bitcoin::secp256k1::Secp256k1;
     use bitcoin::taproot::LeafVersion;
     use bitcoin::{Address, Network, ScriptBuf, TapLeafHash};
-    use payjoin_test_utils::{PARSED_ORIGINAL_PSBT, QUERY_PARAMS, RECEIVER_INPUT_CONTRIBUTION};
+    use payjoin_test_utils::{RECEIVER_INPUT_CONTRIBUTION, unchecked_proposal_from_test_vector, wants_outputs_from_test_vector};
     use rand::rngs::StdRng;
     use rand::SeedableRng;
 
     use super::*;
     use crate::receive::PayloadError;
-    use crate::Version;
-
-    pub(crate) fn unchecked_proposal_from_test_vector() -> UncheckedProposal {
-        let pairs = url::form_urlencoded::parse(QUERY_PARAMS.as_bytes());
-        let params = Params::from_query_pairs(pairs, &[Version::One])
-            .expect("Could not parse params from query pairs");
-        UncheckedProposal { psbt: PARSED_ORIGINAL_PSBT.clone(), params }
-    }
-
-    pub(crate) fn maybe_inputs_owned_from_test_vector() -> MaybeInputsOwned {
-        let proposal = unchecked_proposal_from_test_vector();
-        proposal
-            .check_broadcast_suitability(None, |_| Ok(true))
-            .expect("Broadcast suitability check should not fail")
-    }
-
-    pub(crate) fn maybe_inputs_seen_from_test_vector() -> MaybeInputsSeen {
-        let maybe_inputs_owned = maybe_inputs_owned_from_test_vector();
-        maybe_inputs_owned.check_inputs_not_owned(|_| Ok(false)).expect("No inputs should be owned")
-    }
-
-    pub(crate) fn outputs_unknown_from_test_vector() -> OutputsUnknown {
-        let maybe_inputs_seen = maybe_inputs_seen_from_test_vector();
-        maybe_inputs_seen
-            .check_no_inputs_seen_before(|_| Ok(false))
-            .expect("No inputs should be seen before")
-    }
-
-    pub(crate) fn wants_outputs_from_test_vector(proposal: UncheckedProposal) -> WantsOutputs {
-        proposal
-            .assume_interactive_receiver()
-            .check_inputs_not_owned(|_| Ok(false))
-            .expect("No inputs should be owned")
-            .check_no_inputs_seen_before(|_| Ok(false))
-            .expect("No inputs should be seen before")
-            .identify_receiver_outputs(|script| {
-                let network = Network::Bitcoin;
-                Ok(Address::from_script(script, network).unwrap()
-                    == Address::from_str("3CZZi7aWFugaCdUCS15dgrUUViupmB8bVM")
-                        .unwrap()
-                        .require_network(network)
-                        .unwrap())
-            })
-            .expect("Receiver output should be identified")
-    }
-
-    pub(crate) fn wants_inputs_from_test_vector() -> WantsInputs {
-        let proposal = unchecked_proposal_from_test_vector();
-        wants_outputs_from_test_vector(proposal).commit_outputs()
-    }
-
-    pub(crate) fn provisional_proposal_from_test_vector(
-        proposal: UncheckedProposal,
-    ) -> ProvisionalProposal {
-        wants_outputs_from_test_vector(proposal).commit_outputs().commit_inputs()
-    }
-
-    pub(crate) fn payjoin_proposal_from_test_vector(
-        proposal: UncheckedProposal,
-    ) -> PayjoinProposal {
-        provisional_proposal_from_test_vector(proposal)
-            .finalize_proposal(|_| Ok(PARSED_ORIGINAL_PSBT.clone()), None, None)
-            .expect("finalize_proposal should not fail")
-    }
 
     #[test]
     fn is_output_substitution_disabled() {

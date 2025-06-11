@@ -52,7 +52,7 @@ pub enum SessionEvent {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::receive::v1::test::{
+    use payjoin_test_utils::{
         maybe_inputs_owned_from_test_vector, maybe_inputs_seen_from_test_vector,
         outputs_unknown_from_test_vector, payjoin_proposal_from_test_vector,
         provisional_proposal_from_test_vector, unchecked_proposal_from_test_vector,

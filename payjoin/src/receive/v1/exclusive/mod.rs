@@ -69,28 +69,28 @@ fn parse_body(
 #[cfg(test)]
 mod tests {
     use bitcoin::{Address, AddressType};
-    use payjoin_test_utils::{ORIGINAL_PSBT, QUERY_PARAMS};
+    use payjoin_test_utils::{ORIGINAL_PSBT, QUERY_PARAMS, MockHeaders};
 
     use super::*;
 
-    #[derive(Debug, Clone)]
-    struct MockHeaders {
-        length: String,
-    }
+    // #[derive(Debug, Clone)]
+    // struct MockHeaders {
+    //     length: String,
+    // }
 
-    impl MockHeaders {
-        fn new(length: u64) -> MockHeaders { MockHeaders { length: length.to_string() } }
-    }
+    // impl MockHeaders {
+    //     fn new(length: u64) -> MockHeaders { MockHeaders { length: length.to_string() } }
+    // }
 
-    impl Headers for MockHeaders {
-        fn get_header(&self, key: &str) -> Option<&str> {
-            match key {
-                "content-length" => Some(&self.length),
-                "content-type" => Some("text/plain"),
-                _ => None,
-            }
-        }
-    }
+    // impl Headers for MockHeaders {
+    //     fn get_header(&self, key: &str) -> Option<&str> {
+    //         match key {
+    //             "content-length" => Some(&self.length),
+    //             "content-type" => Some("text/plain"),
+    //             _ => None,
+    //         }
+    //     }
+    // }
 
     #[test]
     fn test_parse_body() {
@@ -120,6 +120,7 @@ mod tests {
         let body = ORIGINAL_PSBT.as_bytes();
         let headers = MockHeaders::new(body.len() as u64);
         let parsed_request = parse_body(headers.clone(), body);
+        println!("parsed_request: {:?}", parsed_request);
         assert!(parsed_request.is_ok());
 
         let proposal = UncheckedProposal::from_request(body, QUERY_PARAMS, headers)?;

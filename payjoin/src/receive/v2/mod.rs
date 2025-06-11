@@ -714,7 +714,7 @@ pub mod test {
     fn extract_err_req() -> Result<(), BoxError> {
         let mut proposal = Receiver {
             state: UncheckedProposal {
-                v1: crate::receive::v1::test::unchecked_proposal_from_test_vector(),
+                v1: payjoin_test_utils::unchecked_proposal_from_test_vector(),
                 context: SHARED_CONTEXT.clone(),
             },
         };
