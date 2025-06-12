@@ -70,7 +70,7 @@ pub enum ReplyableError {
 ///     "message": "Human readable error message"
 /// }
 /// ```
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct JsonReply {
     /// The error code
     error_code: ErrorCode,
@@ -103,8 +103,8 @@ impl JsonReply {
     }
 }
 
-impl From<ReplyableError> for JsonReply {
-    fn from(e: ReplyableError) -> Self {
+impl From<&ReplyableError> for JsonReply {
+    fn from(e: &ReplyableError) -> Self {
         use ReplyableError::*;
         match e {
             Payload(e) => e.into(),
@@ -164,7 +164,7 @@ impl From<InternalPayloadError> for PayloadError {
 #[derive(Debug)]
 pub(crate) enum InternalPayloadError {
     /// The payload is not valid utf-8
-    Utf8(std::string::FromUtf8Error),
+    Utf8(std::str::Utf8Error),
     /// The payload is not a valid PSBT
     ParsePsbt(bitcoin::psbt::PsbtParseError),
     /// Invalid sender parameters
@@ -196,8 +196,8 @@ pub(crate) enum InternalPayloadError {
     FeeTooHigh(bitcoin::FeeRate, bitcoin::FeeRate),
 }
 
-impl From<PayloadError> for JsonReply {
-    fn from(e: PayloadError) -> Self {
+impl From<&PayloadError> for JsonReply {
+    fn from(e: &PayloadError) -> Self {
         use InternalPayloadError::*;
 
         match &e.0 {
