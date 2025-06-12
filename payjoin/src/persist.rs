@@ -309,6 +309,22 @@ where
             _ => None,
         }
     }
+
+    pub fn storage_error_ref(&self) -> Option<&StorageError<StorageErr>> {
+        match &self.0 {
+            InternalPersistedError::Storage(e) => Some(e),
+            _ => None,
+        }
+    }
+
+    pub fn api_error_ref(&self) -> Option<&ApiErr> {
+        match &self.0 {
+            InternalPersistedError::Fatal(e)
+            | InternalPersistedError::BadInitInputs(e)
+            | InternalPersistedError::Transient(e) => Some(e),
+            _ => None,
+        }
+    }
 }
 
 impl<ApiError: std::error::Error, StorageError: std::error::Error>
@@ -367,7 +383,7 @@ impl<NextState, CurrentState> OptionalTransitionOutcome<NextState, CurrentState>
 
     pub fn is_success(&self) -> bool { matches!(self, OptionalTransitionOutcome::Progress(_)) }
 
-    pub fn success(&self) -> Option<&NextState> {
+    pub fn success(self) -> Option<NextState> {
         match self {
             OptionalTransitionOutcome::Progress(next_state) => Some(next_state),
             OptionalTransitionOutcome::Stasis(_) => None,
@@ -609,7 +625,16 @@ pub mod test_utils {
         fn default() -> Self { Self { inner: Arc::new(RwLock::new(InnerStorage::default())) } }
     }
 
-    #[derive(Clone)]
+    impl<V: PartialEq> PartialEq for InMemoryTestPersister<V> {
+        fn eq(&self, other: &Self) -> bool {
+            self.inner.read().expect("Lock should not be poisoned").is_closed
+                == other.inner.read().expect("Lock should not be poisoned").is_closed
+                && self.inner.read().expect("Lock should not be poisoned").events
+                    == other.inner.read().expect("Lock should not be poisoned").events
+        }
+    }
+
+    #[derive(Clone, PartialEq)]
     pub(crate) struct InnerStorage<V> {
         pub(crate) events: Vec<V>,
         pub(crate) is_closed: bool,
@@ -1011,7 +1036,7 @@ mod tests {
         let success = OptionalTransitionOutcome::<String, String>::Progress(next_state.clone());
         assert!(!success.is_none());
         assert!(success.is_success());
-        assert_eq!(success.success(), Some(&next_state));
+        assert_eq!(success.success(), Some(next_state));
 
         let no_results = OptionalTransitionOutcome::<String, String>::Stasis(current_state.clone());
         assert!(no_results.is_none());

@@ -88,8 +88,8 @@ impl AppTrait for App {
             self.config.v2()?.pj_directory.clone(),
             ohttp_keys,
             None,
-        )
-        .save(&persister)?;
+            persister.clone(),
+        )?;
         println!("Receive session established");
         let mut pj_uri = session.pj_uri();
         pj_uri.amount = Some(amount);
@@ -206,9 +206,8 @@ impl App {
 
     async fn long_poll_fallback(
         &self,
-        session: Receiver<WithContext>,
-        persister: &ReceiverPersister,
-    ) -> Result<Receiver<UncheckedProposal>> {
+        session: Receiver<WithContext, ReceiverPersister>,
+    ) -> Result<Receiver<UncheckedProposal, ReceiverPersister>> {
         let ohttp_relay = self
             .unwrap_relay_or_else_fetch(Some(session.pj_uri().extras.endpoint().clone()))
             .await?;
@@ -218,9 +217,8 @@ impl App {
             let (req, context) = session.extract_req(&ohttp_relay)?;
             println!("Polling receive request...");
             let ohttp_response = post_request(req).await?;
-            let state_transition = session
-                .process_res(ohttp_response.bytes().await?.to_vec().as_slice(), context)
-                .save(persister);
+            let state_transition =
+                session.process_res(ohttp_response.bytes().await?.to_vec().as_slice(), context);
             match state_transition {
                 Ok(OptionalTransitionOutcome::Progress(next_state)) => {
                     println!("Got a request from the sender. Responding with a Payjoin proposal.");
@@ -237,29 +235,27 @@ impl App {
 
     async fn process_receiver_session(
         &self,
-        session: ReceiverTypeState,
+        session: ReceiverTypeState<ReceiverPersister>,
         persister: &ReceiverPersister,
     ) -> Result<()> {
         let res = {
             match session {
                 ReceiverTypeState::WithContext(proposal) =>
-                    self.read_from_directory(proposal, persister).await,
+                    self.read_from_directory(proposal).await,
                 ReceiverTypeState::UncheckedProposal(proposal) =>
-                    self.check_proposal(proposal, persister).await,
+                    self.check_proposal(proposal).await,
                 ReceiverTypeState::MaybeInputsOwned(proposal) =>
-                    self.check_inputs_not_owned(proposal, persister).await,
+                    self.check_inputs_not_owned(proposal).await,
                 ReceiverTypeState::MaybeInputsSeen(proposal) =>
-                    self.check_no_inputs_seen_before(proposal, persister).await,
+                    self.check_no_inputs_seen_before(proposal).await,
                 ReceiverTypeState::OutputsUnknown(proposal) =>
-                    self.identify_receiver_outputs(proposal, persister).await,
-                ReceiverTypeState::WantsOutputs(proposal) =>
-                    self.commit_outputs(proposal, persister).await,
-                ReceiverTypeState::WantsInputs(proposal) =>
-                    self.contribute_inputs(proposal, persister).await,
+                    self.identify_receiver_outputs(proposal).await,
+                ReceiverTypeState::WantsOutputs(proposal) => self.commit_outputs(proposal).await,
+                ReceiverTypeState::WantsInputs(proposal) => self.contribute_inputs(proposal).await,
                 ReceiverTypeState::ProvisionalProposal(proposal) =>
-                    self.finalize_proposal(proposal, persister).await,
+                    self.finalize_proposal(proposal).await,
                 ReceiverTypeState::PayjoinProposal(proposal) =>
-                    self.send_payjoin_proposal(proposal, persister).await,
+                    self.send_payjoin_proposal(proposal).await,
                 ReceiverTypeState::Uninitialized(_) =>
                     return Err(anyhow!("Uninitialized receiver session")),
                 ReceiverTypeState::TerminalState =>
@@ -286,12 +282,11 @@ impl App {
     #[allow(clippy::incompatible_msrv)]
     async fn read_from_directory(
         &self,
-        session: Receiver<WithContext>,
-        persister: &ReceiverPersister,
+        session: Receiver<WithContext, ReceiverPersister>,
     ) -> Result<()> {
         let mut interrupt = self.interrupt.clone();
         let receiver = tokio::select! {
-            res = self.long_poll_fallback(session, persister) => res,
+            res = self.long_poll_fallback(session) => res,
             _ = interrupt.changed() => {
                 println!("Interrupted. Call the `resume` command to resume all sessions.");
                 return Err(anyhow!("Interrupted"));
@@ -299,106 +294,91 @@ impl App {
         }?;
         println!("Fallback transaction received. Consider broadcasting this to get paid if the Payjoin fails:");
         println!("{}", serialize_hex(&receiver.extract_tx_to_schedule_broadcast()));
-        self.check_proposal(receiver, persister).await
+        self.check_proposal(receiver).await
     }
 
     async fn check_proposal(
         &self,
-        proposal: Receiver<UncheckedProposal>,
-        persister: &ReceiverPersister,
+        proposal: Receiver<UncheckedProposal, ReceiverPersister>,
     ) -> Result<()> {
         let wallet = self.wallet();
-        let proposal = proposal
-            .check_broadcast_suitability(None, |tx| Ok(wallet.can_broadcast(tx)?))
-            .save(persister)?;
+        let proposal =
+            proposal.check_broadcast_suitability(None, |tx| Ok(wallet.can_broadcast(tx)?))?;
 
-        self.check_inputs_not_owned(proposal, persister).await
+        self.check_inputs_not_owned(proposal).await
     }
 
     async fn check_inputs_not_owned(
         &self,
-        proposal: Receiver<MaybeInputsOwned>,
-        persister: &ReceiverPersister,
+        proposal: Receiver<MaybeInputsOwned, ReceiverPersister>,
     ) -> Result<()> {
         let wallet = self.wallet();
-        let proposal =
-            proposal.check_inputs_not_owned(|input| Ok(wallet.is_mine(input)?)).save(persister)?;
-        self.check_no_inputs_seen_before(proposal, persister).await
+        let proposal = proposal.check_inputs_not_owned(|input| Ok(wallet.is_mine(input)?))?;
+        self.check_no_inputs_seen_before(proposal).await
     }
 
     async fn check_no_inputs_seen_before(
         &self,
-        proposal: Receiver<MaybeInputsSeen>,
-        persister: &ReceiverPersister,
+        proposal: Receiver<MaybeInputsSeen, ReceiverPersister>,
     ) -> Result<()> {
         let proposal = proposal
-            .check_no_inputs_seen_before(|input| Ok(self.db.insert_input_seen_before(*input)?))
-            .save(persister)?;
-        self.identify_receiver_outputs(proposal, persister).await
+            .check_no_inputs_seen_before(|input| Ok(self.db.insert_input_seen_before(*input)?))?;
+        self.identify_receiver_outputs(proposal).await
     }
 
     async fn identify_receiver_outputs(
         &self,
-        proposal: Receiver<OutputsUnknown>,
-        persister: &ReceiverPersister,
+        proposal: Receiver<OutputsUnknown, ReceiverPersister>,
     ) -> Result<()> {
         let wallet = self.wallet();
         let proposal = proposal
-            .identify_receiver_outputs(|output_script| Ok(wallet.is_mine(output_script)?))
-            .save(persister)?;
-        self.commit_outputs(proposal, persister).await
+            .identify_receiver_outputs(|output_script| Ok(wallet.is_mine(output_script)?))?;
+        self.commit_outputs(proposal).await
     }
 
     async fn commit_outputs(
         &self,
-        proposal: Receiver<WantsOutputs>,
-        persister: &ReceiverPersister,
+        proposal: Receiver<WantsOutputs, ReceiverPersister>,
     ) -> Result<()> {
-        let proposal = proposal.commit_outputs().save(persister)?;
-        self.contribute_inputs(proposal, persister).await
+        let proposal = proposal.commit_outputs()?;
+        self.contribute_inputs(proposal).await
     }
 
     async fn contribute_inputs(
         &self,
-        proposal: Receiver<WantsInputs>,
-        persister: &ReceiverPersister,
+        proposal: Receiver<WantsInputs, ReceiverPersister>,
     ) -> Result<()> {
         let wallet = self.wallet();
         let candidate_inputs = wallet.list_unspent()?;
 
         let selected_input = proposal.try_preserving_privacy(candidate_inputs)?;
-        let proposal =
-            proposal.contribute_inputs(vec![selected_input])?.commit_inputs().save(persister)?;
-        self.finalize_proposal(proposal, persister).await
+        let proposal = proposal.contribute_inputs(vec![selected_input])?.commit_inputs()?;
+        self.finalize_proposal(proposal).await
     }
 
     async fn finalize_proposal(
         &self,
-        proposal: Receiver<ProvisionalProposal>,
-        persister: &ReceiverPersister,
+        proposal: Receiver<ProvisionalProposal, ReceiverPersister>,
     ) -> Result<()> {
         let wallet = self.wallet();
-        let proposal = proposal
-            .finalize_proposal(
-                |psbt| Ok(wallet.process_psbt(psbt)?),
-                None,
-                self.config.max_fee_rate,
-            )
-            .save(persister)?;
-        self.send_payjoin_proposal(proposal, persister).await
+        let proposal = proposal.finalize_proposal(
+            |psbt| Ok(wallet.process_psbt(psbt)?),
+            None,
+            self.config.max_fee_rate,
+        )?;
+        self.send_payjoin_proposal(proposal).await
     }
 
     async fn send_payjoin_proposal(
         &self,
-        mut proposal: Receiver<PayjoinProposal>,
-        persister: &ReceiverPersister,
+        mut proposal: Receiver<PayjoinProposal, ReceiverPersister>,
     ) -> Result<()> {
         let (req, ohttp_ctx) = proposal
             .extract_req(&self.unwrap_relay_or_else_fetch(None).await?)
             .map_err(|e| anyhow!("v2 req extraction failed {}", e))?;
         let res = post_request(req).await?;
         let payjoin_psbt = proposal.psbt().clone();
-        proposal.process_res(&res.bytes().await?, ohttp_ctx).save(persister)?;
+        proposal.process_res(&res.bytes().await?, ohttp_ctx)?;
         println!(
             "Response successful. Watch mempool for successful Payjoin. TXID: {}",
             payjoin_psbt.extract_tx_unchecked_fee_rate().clone().compute_txid()

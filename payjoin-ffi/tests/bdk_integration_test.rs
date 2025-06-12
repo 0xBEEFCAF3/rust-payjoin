@@ -224,6 +224,7 @@ mod v2 {
     use payjoin_ffi::uri::Uri;
     use payjoin_ffi::{NoopPersister, NoopSessionPersister, Request};
     use payjoin_test_utils::TestServices;
+    use payjoin::receive::v2::SessionEvent;
 
     use super::*;
     use crate::{
@@ -255,13 +256,13 @@ mod v2 {
 
             let address = receiver.get_address(AddressIndex::New);
             let recv_session_persister = NoopSessionPersister::default();
-            let session = UninitializedReceiver::create_session(
+            let mut session = UninitializedReceiver::create_session(
                 Address::new(address.to_string(), Network::Regtest).unwrap(),
                 directory.to_string(),
                 ohttp_keys,
                 None,
-            )
-            .save(&recv_session_persister)?;
+                recv_session_persister.clone(),
+            )?;
             let ohttp_relay = services.ohttp_relay_url();
             // Poll receive request
             let (request, client_response) = session.extract_req(ohttp_relay.to_string())?;
@@ -272,10 +273,8 @@ mod v2 {
                 .send()
                 .await?;
             assert!(response.status().is_success());
-            let response_body = session
-                .process_res(&response.bytes().await?, &client_response)
-                .save(&recv_session_persister)
-                .unwrap();
+            let response_body =
+                session.process_res(&response.bytes().await?, &client_response).unwrap();
             // No proposal yet since sender has not responded
             assert!(response_body.is_none());
 
@@ -314,8 +313,7 @@ mod v2 {
                 .send()
                 .await?;
             let proposal = session
-                .process_res(&response.bytes().await?, &client_response)
-                .save(&recv_session_persister)?
+                .process_res(&response.bytes().await?, &client_response)?
                 .success()
                 .expect("proposal should exist");
             let payjoin_proposal = handle_directory_proposal(receiver, proposal);
@@ -327,9 +325,7 @@ mod v2 {
                 .body(request.body)
                 .send()
                 .await?;
-            payjoin_proposal
-                .process_res(&response.bytes().await?, &client_response)
-                .save(&recv_session_persister)?;
+            payjoin_proposal.process_res(&response.bytes().await?, &client_response)?;
 
             // **********************
             // Inside the Sender:
@@ -351,37 +347,31 @@ mod v2 {
         }
     }
 
-    fn handle_directory_proposal(receiver: Wallet, proposal: UncheckedProposal) -> PayjoinProposal {
-        let session_persister = NoopSessionPersister::default();
+    fn handle_directory_proposal(receiver: Wallet, proposal: UncheckedProposal<NoopSessionPersister<SessionEvent>>) -> PayjoinProposal<NoopSessionPersister<SessionEvent>> {
         // in a payment processor where the sender could go offline, this is where you schedule to broadcast the original_tx
-        let _to_broadcast_in_failure_case = proposal.extract_tx_to_schedule_broadcast();
+        // let _to_broadcast_in_failure_case = proposal.extract_tx_to_schedule_broadcast();
 
         // Receive Check 1: Can Broadcast
         let proposal = proposal
             .assume_interactive_receiver()
-            .save(&session_persister)
             .expect("Noop Persister should not fail");
         let receiver = Arc::new(receiver);
         // Receive Check 2: receiver can't sign for proposal inputs
         let proposal = proposal
             .check_inputs_not_owned(|script| is_script_owned(&receiver, script.clone()))
-            .save(&session_persister)
             .expect("Receiver should not own any of the inputs");
 
         // Receive Check 3: have we seen this input before? More of a check for non-interactive i.e. payment processor receivers.
         let wants_outputs = proposal
             .check_no_inputs_seen_before(|outpoint| mock_is_output_known(outpoint.clone()))
-            .save(&session_persister)
             .unwrap()
             .identify_receiver_outputs(|script| is_script_owned(&receiver, script.clone()))
-            .save(&session_persister)
             .expect("Receiver should have at least one output");
         _ = wants_outputs.substitute_receiver_script(&bitcoin_ffi::Script::new(
             receiver.get_address(AddressIndex::New).script_pubkey().into_bytes(),
         ));
         let wants_inputs = wants_outputs
             .commit_outputs()
-            .save(&session_persister)
             .expect("Noop Persister should not fail");
         // Select receiver payjoin inputs. TODO Lock them.
         let available_inputs = receiver
@@ -398,12 +388,10 @@ mod v2 {
             .contribute_inputs(vec![selected_outpoint])
             .unwrap()
             .commit_inputs()
-            .save(&session_persister)
             .expect("Noop Persister should not fail");
 
         let payjoin_proposal = provisional_proposal
             .finalize_proposal(|psbt| process_psbt(&receiver, psbt), Some(10), Some(100))
-            .save(&session_persister)
             .unwrap();
         payjoin_proposal
     }
