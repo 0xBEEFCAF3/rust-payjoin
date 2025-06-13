@@ -72,15 +72,6 @@ where
     }
 }
 
-impl<E> From<payjoin::persist::StorageError<E>> for PersistedError
-where
-    E: std::error::Error,
-{
-    fn from(err: payjoin::persist::StorageError<E>) -> Self {
-        PersistedError::Storage(Arc::new(ImplementationError::from(err.to_string())))
-    }
-}
-
 impl<S> From<payjoin::persist::PersistedError<payjoin::IntoUrlError, S>> for PersistedError
 where
     S: std::error::Error,
