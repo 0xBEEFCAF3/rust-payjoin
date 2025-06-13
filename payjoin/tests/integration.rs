@@ -173,7 +173,8 @@ mod integration {
         use http::StatusCode;
         use payjoin::persist::{NoopPersister, NoopSessionPersister};
         use payjoin::receive::v2::{
-            replay_receiver_event_log, PayjoinProposal, Receiver, UncheckedProposal,
+            replay_receiver_event_log, PayjoinProposal, Receiver,
+            SessionEvent as ReceiverSessionEvent, UncheckedProposal,
         };
         use payjoin::send::v2::{Sender, SenderBuilder};
         use payjoin::{OhttpKeys, PjUri, UriExt};
@@ -209,9 +210,13 @@ mod integration {
                 let mock_address = Address::from_str("tb1q6d3a2w975yny0asuvd9a67ner4nks58ff0q8g4")?
                     .assume_checked();
                 let noop_persister = NoopSessionPersister::default();
-                let mut bad_initializer =
-                    Receiver::create_session(mock_address, directory, bad_ohttp_keys, None)
-                        .save(&noop_persister)?;
+                let mut bad_initializer = Receiver::create_session(
+                    mock_address,
+                    directory,
+                    bad_ohttp_keys,
+                    None,
+                    noop_persister.clone(),
+                )?;
                 let (req, _ctx) = bad_initializer.extract_req(&ohttp_relay)?;
                 agent
                     .post(req.url)
@@ -253,8 +258,8 @@ mod integration {
                     directory.clone(),
                     ohttp_keys.clone(),
                     Some(Duration::from_secs(0)),
-                )
-                .save(&noop_persister)?;
+                    noop_persister.clone(),
+                )?;
                 match expired_receiver.extract_req(&ohttp_relay) {
                     // Internal error types are private, so check against a string
                     Err(err) => assert!(err.to_string().contains("expired")),
@@ -311,9 +316,10 @@ mod integration {
                     directory.clone(),
                     ohttp_keys.clone(),
                     None,
-                )
-                .save(&persister)?;
-                println!("session: {:#?}", &session);
+                    persister.clone(),
+                )?;
+                // TODO: this is commented out bc a receiver generic over its persister does not impl Debug
+                // println!("session: {:#?}", &session);
                 // Poll receive request
                 let ohttp_relay = services.ohttp_relay_url();
                 let (req, ctx) = session.extract_req(&ohttp_relay)?;
@@ -324,9 +330,8 @@ mod integration {
                     .send()
                     .await?;
                 assert!(response.status().is_success(), "error response: {}", response.status());
-                let response_body = session
-                    .process_res(response.bytes().await?.to_vec().as_slice(), ctx)
-                    .save(&persister)?;
+                let response_body =
+                    session.process_res(response.bytes().await?.to_vec().as_slice(), ctx)?;
                 // No proposal yet since sender has not responded
                 assert!(response_body.is_none());
 
@@ -369,20 +374,17 @@ mod integration {
                     .send()
                     .await?;
                 // POST payjoin
-                let outcome = session
-                    .process_res(response.bytes().await?.to_vec().as_slice(), ctx)
-                    .save(&persister)?;
+                let outcome =
+                    session.process_res(response.bytes().await?.to_vec().as_slice(), ctx)?;
                 let proposal = outcome.success().expect("proposal should exist").clone();
 
                 // Generate replyable error
-                let check_broadcast_suitability = || {
-                    proposal
-                        .clone()
-                        .check_broadcast_suitability(None, |_| Ok(false))
-                        .save(&persister)
-                };
+                let check_broadcast_suitability =
+                    || proposal.clone().check_broadcast_suitability(None, |_| Ok(false));
                 let server_error = check_broadcast_suitability()
-                    .expect_err("should fail")
+                    // Note: expect_err does not work here bc the inner Ok variant does not impl Debug
+                    .err()
+                    .expect("should fail")
                     .api_error()
                     .expect("expected api error");
                 // TODO: this should be replaced by comparing the error itself once the error types impl PartialEq
@@ -439,8 +441,8 @@ mod integration {
                     directory.clone(),
                     ohttp_keys.clone(),
                     None,
-                )
-                .save(&noop_persister)?;
+                    noop_persister.clone(),
+                )?;
                 println!("session: {:#?}", &session);
                 // Poll receive request
                 let ohttp_relay = services.ohttp_relay_url();
@@ -452,9 +454,8 @@ mod integration {
                     .send()
                     .await?;
                 assert!(response.status().is_success(), "error response: {}", response.status());
-                let response_body = session
-                    .process_res(response.bytes().await?.to_vec().as_slice(), ctx)
-                    .save(&noop_persister)?;
+                let response_body =
+                    session.process_res(response.bytes().await?.to_vec().as_slice(), ctx)?;
                 // No proposal yet since sender has not responded
                 assert!(response_body.is_none());
 
@@ -498,9 +499,8 @@ mod integration {
                     .send()
                     .await?;
                 // POST payjoin
-                let outcome = session
-                    .process_res(response.bytes().await?.to_vec().as_slice(), ctx)
-                    .save(&noop_persister)?;
+                let outcome =
+                    session.process_res(response.bytes().await?.to_vec().as_slice(), ctx)?;
                 let proposal = outcome.success().expect("proposal should exist").clone();
                 let mut payjoin_proposal = handle_directory_proposal(&receiver, proposal, None)?;
                 let (req, ctx) = payjoin_proposal.extract_req(&ohttp_relay)?;
@@ -510,9 +510,7 @@ mod integration {
                     .body(req.body)
                     .send()
                     .await?;
-                payjoin_proposal
-                    .process_res(&response.bytes().await?, ctx)
-                    .save(&noop_persister)?;
+                payjoin_proposal.process_res(&response.bytes().await?, ctx)?;
 
                 // **********************
                 // Inside the Sender:
@@ -622,9 +620,13 @@ mod integration {
                 let ohttp_keys = services.fetch_ohttp_keys().await?;
                 let recv_persister = NoopSessionPersister::default();
                 let address = receiver.get_new_address(None, None)?.assume_checked();
-                let mut session =
-                    Receiver::create_session(address, directory.clone(), ohttp_keys.clone(), None)
-                        .save(&recv_persister)?;
+                let mut session = Receiver::create_session(
+                    address,
+                    directory.clone(),
+                    ohttp_keys.clone(),
+                    None,
+                    recv_persister.clone(),
+                )?;
 
                 // **********************
                 // Inside the V1 Sender:
@@ -675,8 +677,7 @@ mod integration {
                         if response.status() == 200 {
                             let proposal = session
                                 .clone()
-                                .process_res(response.bytes().await?.to_vec().as_slice(), ctx)
-                                .save(&recv_persister)?;
+                                .process_res(response.bytes().await?.to_vec().as_slice(), ctx)?;
                             if let Some(unchecked_proposal) = proposal.success() {
                                 break unchecked_proposal.clone();
                             } else {
@@ -703,7 +704,6 @@ mod integration {
                         .await?;
                     payjoin_proposal
                         .process_res(&response.bytes().await?, ctx)
-                        .save(&recv_persister)
                         .map_err(|e| e.to_string())?;
                     Ok::<_, BoxSendSyncError>(())
                 });
@@ -746,50 +746,40 @@ mod integration {
 
         fn handle_directory_proposal(
             receiver: &bitcoincore_rpc::Client,
-            proposal: Receiver<UncheckedProposal>,
+            proposal: Receiver<UncheckedProposal, NoopSessionPersister<ReceiverSessionEvent>>,
             custom_inputs: Option<Vec<InputPair>>,
-        ) -> Result<Receiver<PayjoinProposal>, BoxError> {
-            let noop_persister = NoopSessionPersister::default();
+        ) -> Result<Receiver<PayjoinProposal, NoopSessionPersister<ReceiverSessionEvent>>, BoxError>
+        {
             // in a payment processor where the sender could go offline, this is where you schedule to broadcast the original_tx
             let _to_broadcast_in_failure_case = proposal.extract_tx_to_schedule_broadcast();
 
             // Receive Check 1: Can Broadcast
-            let proposal = proposal
-                .check_broadcast_suitability(None, |tx| {
-                    Ok(receiver
-                        .test_mempool_accept(&[bitcoin::consensus::encode::serialize_hex(&tx)])?
-                        .first()
-                        .ok_or(ImplementationError::from(
-                            "testmempoolaccept should return a result",
-                        ))?
-                        .allowed)
-                })
-                .save(&noop_persister)?;
+            let proposal = proposal.check_broadcast_suitability(None, |tx| {
+                Ok(receiver
+                    .test_mempool_accept(&[bitcoin::consensus::encode::serialize_hex(&tx)])?
+                    .first()
+                    .ok_or(ImplementationError::from("testmempoolaccept should return a result"))?
+                    .allowed)
+            })?;
 
             // Receive Check 2: receiver can't sign for proposal inputs
-            let proposal = proposal
-                .check_inputs_not_owned(|input| {
-                    let address = bitcoin::Address::from_script(input, bitcoin::Network::Regtest)?;
-                    Ok(receiver
-                        .get_address_info(&address)
-                        .map(|info| info.is_mine.unwrap_or(false))?)
-                })
-                .save(&noop_persister)?;
+            let proposal = proposal.check_inputs_not_owned(|input| {
+                let address = bitcoin::Address::from_script(input, bitcoin::Network::Regtest)?;
+                Ok(receiver.get_address_info(&address).map(|info| info.is_mine.unwrap_or(false))?)
+            })?;
 
             // Receive Check 3: have we seen this input before? More of a check for non-interactive i.e. payment processor receivers.
             let payjoin = proposal
-                .check_no_inputs_seen_before(|_| Ok(false))
-                .save(&noop_persister)?
+                .check_no_inputs_seen_before(|_| Ok(false))?
                 .identify_receiver_outputs(|output_script| {
                     let address =
                         bitcoin::Address::from_script(output_script, bitcoin::Network::Regtest)?;
                     Ok(receiver
                         .get_address_info(&address)
                         .map(|info| info.is_mine.unwrap_or(false))?)
-                })
-                .save(&noop_persister)?;
+                })?;
 
-            let payjoin = payjoin.commit_outputs().save(&noop_persister)?;
+            let payjoin = payjoin.commit_outputs()?;
 
             let inputs = match custom_inputs {
                 Some(inputs) => inputs,
@@ -809,28 +799,25 @@ mod integration {
             let payjoin = payjoin
                 .contribute_inputs(inputs)
                 .map_err(|e| format!("Failed to contribute inputs: {e:?}"))?
-                .commit_inputs()
-                .save(&noop_persister)?;
+                .commit_inputs()?;
 
             // Sign and finalize the proposal PSBT
-            let payjoin = payjoin
-                .finalize_proposal(
-                    |psbt: &Psbt| {
-                        Ok(receiver
-                            .wallet_process_psbt(
-                                &psbt.to_string(),
-                                None,
-                                None,
-                                Some(true), // check that the receiver properly clears keypaths
-                            )
-                            .map(|res: WalletProcessPsbtResult| {
-                                Psbt::from_str(&res.psbt).expect("psbt should be valid")
-                            })?)
-                    },
-                    Some(FeeRate::BROADCAST_MIN),
-                    Some(FeeRate::from_sat_per_vb_unchecked(2)),
-                )
-                .save(&noop_persister)?;
+            let payjoin = payjoin.finalize_proposal(
+                |psbt: &Psbt| {
+                    Ok(receiver
+                        .wallet_process_psbt(
+                            &psbt.to_string(),
+                            None,
+                            None,
+                            Some(true), // check that the receiver properly clears keypaths
+                        )
+                        .map(|res: WalletProcessPsbtResult| {
+                            Psbt::from_str(&res.psbt).expect("psbt should be valid")
+                        })?)
+                },
+                Some(FeeRate::BROADCAST_MIN),
+                Some(FeeRate::from_sat_per_vb_unchecked(2)),
+            )?;
             Ok(payjoin)
         }
 
@@ -866,7 +853,7 @@ mod integration {
     mod multiparty {
         use bitcoin::ScriptBuf;
         use payjoin::persist::{NoopPersister, NoopSessionPersister};
-        use payjoin::receive::v2::{Receiver, WithContext};
+        use payjoin::receive::v2::{Receiver, SessionEvent as ReceiverSessionEvent, WithContext};
         use payjoin::send::multiparty::{
             GetContext as MultiPartyGetContext, Sender, SenderBuilder as MultiPartySenderBuilder,
         };
@@ -878,7 +865,7 @@ mod integration {
         use crate::integration::v2::build_sweep_psbt;
 
         struct InnerSenderTestSession {
-            receiver_session: Receiver<WithContext>,
+            receiver_session: Receiver<WithContext, NoopSessionPersister<ReceiverSessionEvent>>,
             sender_get_ctx: MultiPartyGetContext,
             script_pubkey: ScriptBuf,
         }
@@ -908,7 +895,7 @@ mod integration {
                 let ohttp_keys = services.fetch_ohttp_keys().await?;
                 let agent = services.http_agent();
 
-                let recv_persister = NoopSessionPersister::default();
+                let recv_persister = NoopSessionPersister::<ReceiverSessionEvent>::default();
                 // **********************
                 // Inside the Senders + Receiver:
                 // G enerate N different addresses and set up the receiver sessions
@@ -920,8 +907,8 @@ mod integration {
                         directory.clone(),
                         ohttp_keys.clone(),
                         None,
-                    )
-                    .save(&recv_persister)?;
+                        recv_persister.clone(),
+                    )?;
                     let pj_uri = receiver_session.pj_uri();
                     let psbt = build_sweep_psbt(sender, &pj_uri)?;
                     let sender_ctx = MultiPartySenderBuilder::new(psbt.clone(), pj_uri.clone())
@@ -966,8 +953,7 @@ mod integration {
                     assert!(response.status().is_success());
                     let res = response.bytes().await?.to_vec();
                     let proposal = receiver_session
-                        .process_res(&res, reciever_ctx)
-                        .save(&recv_persister)?
+                        .process_res(&res, reciever_ctx)?
                         .success()
                         .expect("proposal should exist")
                         .clone();
@@ -990,7 +976,7 @@ mod integration {
 
                     assert!(response.status().is_success());
                     let res = response.bytes().await?.to_vec();
-                    proposal.process_res(&res, ctx).save(&recv_persister)?;
+                    proposal.process_res(&res, ctx)?;
                 }
 
                 // **********************
@@ -1040,8 +1026,7 @@ mod integration {
                     assert!(response.status().is_success());
 
                     let finalized_response = receiver_session
-                        .process_res(response.bytes().await?.to_vec().as_slice(), reciever_ctx)
-                        .save(&recv_persister)?
+                        .process_res(response.bytes().await?.to_vec().as_slice(), reciever_ctx)?
                         .success()
                         .expect("proposal should exist")
                         .clone();

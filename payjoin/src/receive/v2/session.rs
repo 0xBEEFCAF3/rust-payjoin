@@ -37,7 +37,8 @@ pub(crate) enum InternalReplayError {
     /// Session expired
     SessionExpired(SystemTime),
     /// Invalid combination of state and event
-    InvalidStateAndEvent(Box<ReceiverTypeState>, Box<SessionEvent>),
+    /// TODO putting receiver type state generic over P seems just wrong. String is a hack to get around it
+    InvalidStateAndEvent(String, Box<SessionEvent>),
     /// Application storage error
     PersistenceFailure(ImplementationError),
 }
@@ -46,21 +47,23 @@ pub(crate) enum InternalReplayError {
 /// and a session history [SessionHistory]
 pub fn replay_receiver_event_log<P>(
     persister: &P,
-) -> Result<(ReceiverTypeState, SessionHistory), ReplayError>
+) -> Result<(ReceiverTypeState<P>, SessionHistory), ReplayError>
 where
-    P: SessionPersister,
+    P: SessionPersister<SessionEvent = SessionEvent> + Clone,
     P::SessionEvent: Into<SessionEvent> + Clone,
 {
     let logs = persister
         .load()
         .map_err(|e| InternalReplayError::PersistenceFailure(Box::new(e).into()))?;
-    let mut receiver =
-        ReceiverTypeState::Uninitialized(Receiver { state: UninitializedReceiver {} });
+    let mut receiver = ReceiverTypeState::Uninitialized(Receiver {
+        state: UninitializedReceiver {},
+        session_persister: persister.clone(),
+    });
     let mut history = SessionHistory::default();
 
     for log in logs {
-        history.events.push(log.clone().into());
-        match receiver.process_event(log.into()) {
+        history.events.push(log.clone());
+        match receiver.process_event(log) {
             Ok(next_receiver) => {
                 receiver = next_receiver;
             }
@@ -281,11 +284,13 @@ mod tests {
     struct SessionHistoryTest {
         events: Vec<SessionEvent>,
         expected_session_history: SessionHistoryExpectedOutcome,
-        expected_receiver_state: ReceiverTypeState,
+        expected_receiver_state: ReceiverTypeState<InMemoryTestPersister<SessionEvent>>,
     }
 
-    fn run_session_history_test(test: SessionHistoryTest) {
-        let persister = InMemoryTestPersister::<SessionEvent>::default();
+    fn run_session_history_test(
+        test: SessionHistoryTest,
+        persister: InMemoryTestPersister<SessionEvent>,
+    ) {
         for event in test.events {
             persister.save_event(&event).expect("In memory persister shouldn't fail");
         }
@@ -314,6 +319,7 @@ mod tests {
     #[test]
     fn test_replaying_session_creation() {
         let session_context = SHARED_CONTEXT.clone();
+        let persister = InMemoryTestPersister::<SessionEvent>::default();
         let test = SessionHistoryTest {
             events: vec![SessionEvent::Created(session_context.clone())],
             expected_session_history: SessionHistoryExpectedOutcome {
@@ -326,15 +332,16 @@ mod tests {
             },
             expected_receiver_state: ReceiverTypeState::WithContext(Receiver {
                 state: WithContext { context: session_context },
+                session_persister: persister.clone(),
             }),
         };
-        run_session_history_test(test);
+        run_session_history_test(test, persister);
     }
 
     #[test]
     fn test_replaying_unchecked_proposal() {
         let session_context = SHARED_CONTEXT.clone();
-
+        let persister = InMemoryTestPersister::<SessionEvent>::default();
         let test = SessionHistoryTest {
             events: vec![
                 SessionEvent::Created(session_context.clone()),
@@ -355,15 +362,16 @@ mod tests {
                     v1: unchecked_proposal_from_test_vector(),
                     context: session_context,
                 },
+                session_persister: persister.clone(),
             }),
         };
-        run_session_history_test(test);
+        run_session_history_test(test, persister);
     }
 
     #[test]
     fn test_replaying_unchecked_proposal_with_reply_key() {
         let session_context = SHARED_CONTEXT.clone();
-
+        let persister = InMemoryTestPersister::<SessionEvent>::default();
         let test = SessionHistoryTest {
             events: vec![
                 SessionEvent::Created(session_context.clone()),
@@ -387,14 +395,16 @@ mod tests {
                     v1: unchecked_proposal_from_test_vector(),
                     context: session_context,
                 },
+                session_persister: persister.clone(),
             }),
         };
-        run_session_history_test(test);
+        run_session_history_test(test, persister);
     }
 
     #[test]
     fn test_contributed_inputs() {
         let session_context = SHARED_CONTEXT.clone();
+        let persister = InMemoryTestPersister::<SessionEvent>::default();
         let mut events = vec![];
 
         let unchecked_proposal = unchecked_proposal_from_test_vector();
@@ -437,14 +447,16 @@ mod tests {
             },
             expected_receiver_state: ReceiverTypeState::ProvisionalProposal(Receiver {
                 state: ProvisionalProposal { v1: provisional_proposal, context: session_context },
+                session_persister: persister.clone(),
             }),
         };
-        run_session_history_test(test);
+        run_session_history_test(test, persister);
     }
 
     #[test]
     fn test_payjoin_proposal() {
         let session_context = SHARED_CONTEXT.clone();
+        let persister = InMemoryTestPersister::<SessionEvent>::default();
         let mut events = vec![];
 
         let unchecked_proposal = unchecked_proposal_from_test_vector();
@@ -492,8 +504,9 @@ mod tests {
             },
             expected_receiver_state: ReceiverTypeState::PayjoinProposal(Receiver {
                 state: PayjoinProposal { v1: payjoin_proposal, context: session_context },
+                session_persister: persister.clone(),
             }),
         };
-        run_session_history_test(test);
+        run_session_history_test(test, persister);
     }
 }

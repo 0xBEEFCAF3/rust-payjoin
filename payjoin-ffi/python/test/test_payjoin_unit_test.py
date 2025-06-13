@@ -54,8 +54,9 @@ class TestReceiverPersistence(unittest.TestCase):
             address, 
             "https://example.com", 
             payjoin.OhttpKeys.from_string("OH1QYPM5JXYNS754Y4R45QWE336QFX6ZR8DQGVQCULVZTV20TFVEYDMFQC"), 
-            None
-        ).save(persister)
+            None,
+            persister
+        )
         result = payjoin.payjoin_ffi.replay_receiver_event_log(persister)
         self.assertTrue(result.state().is_WITH_CONTEXT())
 
@@ -82,8 +83,9 @@ class TestSenderPersistence(unittest.TestCase):
             address, 
             "https://example.com", 
             payjoin.OhttpKeys.from_string("OH1QYPM5JXYNS754Y4R45QWE336QFX6ZR8DQGVQCULVZTV20TFVEYDMFQC"), 
-            None
-        ).save(persister)
+            None,
+            persister
+        )
         uri = receiver.pj_uri()
 
         persister = InMemorySenderPersister()
