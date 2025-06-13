@@ -27,7 +27,7 @@ use crate::output_substitution::OutputSubstitution;
 use crate::persist::{
     MaybeBadInitInputsTransition, MaybeFatalTransition, MaybeFatalTransitionWithNoResults,
     MaybeSuccessTransition, MaybeTransientTransition, NextStateTransition,
-    OptionalTransitionOutcome, PersistedError, SessionPersister, StorageError,
+    OptionalTransitionOutcome, PersistedError, SessionPersister,
 };
 use crate::receive::{parse_payload, InputPair};
 use crate::uri::ShortId;
@@ -542,7 +542,7 @@ impl<P: SessionPersister<SessionEvent = SessionEvent> + Clone> Receiver<Unchecke
     /// Those receivers call `extract_tx_to_check_broadcast()` after making those checks downstream.
     pub fn assume_interactive_receiver(
         self,
-    ) -> Result<Receiver<MaybeInputsOwned, P>, StorageError<P::InternalStorageError>> {
+    ) -> Result<Receiver<MaybeInputsOwned, P>, P::InternalStorageError> {
         let inner = self.state.v1.assume_interactive_receiver();
         NextStateTransition::success(
             SessionEvent::MaybeInputsOwned(inner.clone()),
@@ -770,9 +770,7 @@ impl<P: SessionPersister<SessionEvent = SessionEvent> + Clone> Receiver<WantsOut
 
     /// Proceed to the input contribution step.
     /// Outputs cannot be modified after this function is called.
-    pub fn commit_outputs(
-        self,
-    ) -> Result<Receiver<WantsInputs, P>, StorageError<P::InternalStorageError>> {
+    pub fn commit_outputs(self) -> Result<Receiver<WantsInputs, P>, P::InternalStorageError> {
         let inner = self.state.v1.clone().commit_outputs();
         NextStateTransition::success(
             SessionEvent::WantsInputs(inner.clone()),
@@ -839,7 +837,7 @@ impl<P: SessionPersister<SessionEvent = SessionEvent> + Clone> Receiver<WantsInp
     /// Inputs cannot be modified after this function is called.
     pub fn commit_inputs(
         self,
-    ) -> Result<Receiver<ProvisionalProposal, P>, StorageError<P::InternalStorageError>> {
+    ) -> Result<Receiver<ProvisionalProposal, P>, P::InternalStorageError> {
         let inner = self.state.v1.clone().commit_inputs();
         NextStateTransition::success(
             SessionEvent::ProvisionalProposal(inner.clone()),
