@@ -1,4 +1,5 @@
 use std::str::FromStr;
+use std::sync::Arc;
 use std::time::Duration;
 
 pub use error::{
@@ -7,7 +8,7 @@ pub use error::{
 };
 use payjoin::bitcoin::psbt::Psbt;
 use payjoin::bitcoin::FeeRate;
-use payjoin::persist::{SessionPersister};
+use payjoin::persist::SessionPersister;
 
 use crate::bitcoin_ffi::{Address, OutPoint, Script, TxOut};
 pub use crate::error::{ImplementationError, SerdeJsonError};
@@ -259,10 +260,10 @@ impl<P: SessionPersister<SessionEvent = payjoin::receive::v2::SessionEvent> + Cl
     ///
     /// So-called "non-interactive" receivers, like payment processors, that allow arbitrary requests are otherwise vulnerable to probing attacks.
     /// Those receivers call `extract_tx_to_check_broadcast()` and `attest_tested_and_scheduled_broadcast()` after making those checks downstream.
-    pub fn assume_interactive_receiver(
-        &self,
-    ) -> Result<MaybeInputsOwned<P>, PersistedError> {
-        let res = self.clone().0.assume_interactive_receiver().map_err(PersistedError::from)?;
+    pub fn assume_interactive_receiver(&self) -> Result<MaybeInputsOwned<P>, PersistedError> {
+        let res = self.clone().0.assume_interactive_receiver().map_err(|e| {
+            PersistedError::Storage(Arc::new(ImplementationError::from(e.to_string())))
+        })?;
         Ok(res.into())
     }
 }
@@ -431,7 +432,9 @@ impl<P: SessionPersister<SessionEvent = payjoin::receive::v2::SessionEvent> + Cl
     }
 
     pub fn commit_outputs(&self) -> Result<WantsInputs<P>, PersistedError> {
-        let res = self.0.clone().commit_outputs().map_err(PersistedError::from)?;
+        let res = self.0.clone().commit_outputs().map_err(|e| {
+            PersistedError::Storage(Arc::new(ImplementationError::from(e.to_string())))
+        })?;
         Ok(res.into())
     }
 }
@@ -490,7 +493,9 @@ impl<P: SessionPersister<SessionEvent = payjoin::receive::v2::SessionEvent> + Cl
     }
 
     pub fn commit_inputs(&self) -> Result<ProvisionalProposal<P>, PersistedError> {
-        let res = self.0.clone().commit_inputs().map_err(PersistedError::from)?;
+        let res = self.0.clone().commit_inputs().map_err(|e| {
+            PersistedError::Storage(Arc::new(ImplementationError::from(e.to_string())))
+        })?;
         Ok(res.into())
     }
 }
