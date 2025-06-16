@@ -6,6 +6,9 @@ pub use crate::send::{
 };
 use crate::{ClientResponse, ImplementationError, PjUri, Request};
 
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct SessionEvent(super::SessionEvent);
+
 #[derive(uniffi::Object)]
 pub struct SenderBuilder(super::SenderBuilder);
 
