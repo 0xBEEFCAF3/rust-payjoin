@@ -35,11 +35,41 @@ use crate::hpke::{decrypt_message_b, encrypt_message_a, HpkeSecretKey};
 use crate::ohttp::{ohttp_encapsulate, process_get_res, process_post_res};
 use crate::persist::Persister;
 use crate::send::v1;
+use crate::send::v2::persist::{InternalReplayError, ReplayError};
 use crate::uri::{ShortId, UrlExt};
 use crate::{HpkeKeyPair, HpkePublicKey, ImplementationError, IntoUrl, OhttpKeys, PjUri, Request};
 
 mod error;
 mod persist;
+
+/// The state of the BIP77 Sender session
+#[derive(Debug, Clone)]
+pub enum SenderTypeState {
+    Uninitialized(),
+    WithReplyKey(Sender<WithReplyKey>),
+    V2GetContext(Sender<V2GetContext>),
+    TerminalState,
+}
+
+impl SenderTypeState {
+    #[allow(dead_code)]
+    fn process_event(self, event: SessionEvent) -> Result<SenderTypeState, ReplayError> {
+        match (self, event) {
+            (
+                SenderTypeState::Uninitialized(),
+                SessionEvent::CreatedReplyKey(sender_with_reply_key),
+            ) => Ok(SenderTypeState::WithReplyKey(Sender { state: sender_with_reply_key })),
+            (SenderTypeState::WithReplyKey(state), SessionEvent::V2GetContext(v2_get_context)) =>
+                Ok(state.apply_v2_get_context(v2_get_context)),
+            (_, SessionEvent::SessionInvalid(_)) => Ok(SenderTypeState::TerminalState),
+            (current_state, event) => Err(InternalReplayError::InvalidStateAndEvent(
+                Box::new(current_state),
+                Box::new(event),
+            )
+            .into()),
+        }
+    }
+}
 
 /// A builder to construct the properties of a [`Sender`].
 #[derive(Clone)]
@@ -126,7 +156,7 @@ impl<'a> SenderBuilder<'a> {
 
 pub trait SenderState {}
 
-#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Sender<State: SenderState> {
     pub(crate) state: State,
 }
@@ -245,6 +275,10 @@ impl Sender<WithReplyKey> {
 
     /// The endpoint in the Payjoin URI
     pub fn endpoint(&self) -> &Url { self.v1.endpoint() }
+
+    pub(crate) fn apply_v2_get_context(self, v2_get_context: V2GetContext) -> SenderTypeState {
+        SenderTypeState::V2GetContext(Sender { state: v2_get_context })
+    }
 }
 
 pub(crate) fn extract_request(

@@ -4,7 +4,8 @@ use url::Url;
 
 use super::{Sender, WithReplyKey};
 use crate::persist::Value;
-use crate::send::v2::V2GetContext;
+use crate::send::v2::{SenderTypeState, V2GetContext};
+use crate::ImplementationError;
 
 /// Opaque key type for the sender
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -38,6 +39,37 @@ pub enum SessionEvent {
     ProposalReceived(bitcoin::Psbt),
     /// Invalid session
     SessionInvalid(String),
+}
+
+/// Errors that can occur when replaying a sender event log
+#[derive(Debug)]
+pub struct ReplayError(InternalReplayError);
+
+impl std::fmt::Display for ReplayError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        use InternalReplayError::*;
+        match &self.0 {
+            InvalidStateAndEvent(state, event) => write!(
+                f,
+                "Invalid combination of state ({state:?}) and event ({event:?}) during replay",
+            ),
+            PersistenceFailure(e) => write!(f, "Persistence failure: {e}"),
+        }
+    }
+}
+impl std::error::Error for ReplayError {}
+
+impl From<InternalReplayError> for ReplayError {
+    fn from(e: InternalReplayError) -> Self { ReplayError(e) }
+}
+
+#[derive(Debug)]
+pub(crate) enum InternalReplayError {
+    /// Invalid combination of state and event
+    InvalidStateAndEvent(Box<SenderTypeState>, Box<SessionEvent>),
+    /// Application storage error
+    #[allow(dead_code)]
+    PersistenceFailure(ImplementationError),
 }
 
 #[cfg(test)]

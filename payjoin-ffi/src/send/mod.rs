@@ -17,6 +17,9 @@ pub mod uni;
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct SessionEvent(payjoin::send::v2::SessionEvent);
 
+#[derive(Debug, Clone)]
+pub struct SenderTypeState(payjoin::send::v2::SenderTypeState);
+
 ///Builder for sender-side payjoin parameters
 ///
 ///These parameters define how client wants to handle Payjoin.
